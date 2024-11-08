@@ -21,7 +21,9 @@ def ionic_model_factory(params):
     models = {
         "passive": Passive_model,
         "hodgkin–huxley": HH_model,
-        "hh"            : HH_model
+        "hh"            : HH_model,
+        "ap"            : AP_model,
+        "aliev-panfilov": AP_model
         # Add other models here as needed
     }
     
@@ -110,11 +112,8 @@ class HH_model(Ionic_model):
         I_ch_Na = g_Na * (phi_M - self.E_Na)
         I_ch_K  = g_K  * (phi_M - self.E_K)
         I_ch_Cl = g_Cl * (phi_M - self.E_Cl)     
-        
-        # total current
-        I_ch = I_ch_Na + I_ch_K + I_ch_Cl      
-        
-        return I_ch
+                
+        return I_ch_Na + I_ch_K + I_ch_Cl      
 
 
     def update_gating_variables(self, phi_M):           
@@ -167,6 +166,25 @@ class HH_model(Ionic_model):
                 self.m += alpha_m * (1 - self.m) - beta_m * self.m
                 self.h += alpha_h * (1 - self.h) - beta_h * self.h 
         
+
+
+# Aliev-Panfilov
+class AP_model(Ionic_model):
+    
+    def __str__(self):
+        return f'Aliev-Panfilov'
+        
+    def _eval(self, phi_M):                 
+
+        # TODO
+        I_ion = phi_M
+
+        return I_ion
+
+
+
+
+
 
 #   def init_png(self):
 
