@@ -1,12 +1,8 @@
-import os
 import ufl
 import time
-import json
 import pickle 
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
-import numpy    as np
-import scipy    as sp
 import dolfinx  as dfx
 from ufl      import inner, grad
 from sys      import argv
@@ -15,7 +11,6 @@ from pathlib  import Path
 from petsc4py import PETSc
 from utils             import *
 from ionic_model       import *
-import matplotlib.pyplot as plt
 
 start_time = time.perf_counter()
     
