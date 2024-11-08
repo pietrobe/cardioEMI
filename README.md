@@ -52,3 +52,9 @@ Given an output file *solX.xdmf* and an tags mesh file *tags.xdmf*, apply the fo
 
 Similarly can be done for the membrane output file *v.xdmf* and facet tags.
 
+### Contributors
+
+* Pietro Benedusi
+* Edoardo Centofanti
+
+
