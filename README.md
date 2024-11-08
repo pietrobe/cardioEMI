@@ -57,4 +57,29 @@ Similarly can be done for the membrane output file *v.xdmf* and facet tags.
 * Pietro Benedusi
 * Edoardo Centofanti
 
+### Cite
+```
+@article{benedusi2024scalable,
+  title={Scalable approximation and solvers for ionic electrodiffusion in cellular geometries},
+  author={Benedusi, Pietro and Ellingsrud, Ada Johanne and Herlyng, Halvor and Rognes, Marie E},
+  journal={SIAM Journal on Scientific Computing},
+  volume={46},
+  number={5},
+  pages={B725--B751},
+  year={2024},
+  publisher={SIAM}
+}
+
+@article{benedusi2024modeling,
+  title={Modeling excitable cells with the EMI equations: spectral analysis and iterative solution strategy},
+  author={Benedusi, Pietro and Ferrari, Paola and Rognes, Marie E and Serra-Capizzano, Stefano},
+  journal={Journal of Scientific Computing},
+  volume={98},
+  number={3},
+  pages={58},
+  year={2024},
+  publisher={Springer}
+}
+```
+
 
