@@ -34,7 +34,7 @@ pip install multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@
 ```
 mpirun -n 1 python3 -u main.py input.yml
 ```
-modifying *input.yml* for input 
+modifying *input.yml* fordifferent input data. Parallel execution can be obtain with mpirun -n X.
 
 ### Mesh creation 
 An square input mesh can be created via 
