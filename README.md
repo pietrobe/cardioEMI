@@ -1,5 +1,5 @@
 # cardioEMI
-Solving cell-by-cell (a.k.a. EMI) models on cardiac geometries.
+Solving cell-by-cell (a.k.a. EMI) models for cardiac geometries.
 
 ### Dependencies
 
