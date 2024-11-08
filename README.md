@@ -10,7 +10,7 @@ Solving cell-by-cell (a.k.a. EMI) models on cardiac geometries
 ### Download
 
 ```
-TODO
+git clone https://github.com/pietrobe/cardioEMI.git
 cd cardioEMI
 ```
 
