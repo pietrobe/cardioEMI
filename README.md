@@ -1,5 +1,5 @@
 # cardioEMI
-Solving cell-by-cell (a.k.a. EMI) models on cardiac geometries
+Solving cell-by-cell (a.k.a. EMI) models on cardiac geometries.
 
 ### Dependencies
 
@@ -16,14 +16,14 @@ cd cardioEMI
 
 ### Installation via Docker
 
-To install FEniCSx
+To install FEniCSx:
 
 ```
 docker run -t -v $(pwd):/home/fenics -i ghcr.io/fenics/dolfinx/dolfinx:v0.7.1
 cd /home/fenics
 ```
 
-To install multiphenicsx in the docker container
+To install multiphenicsx in the docker container:
 
 ```
 pip install multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1
@@ -42,7 +42,7 @@ An square input mesh can be created via
 ```
 python3 create_square_mesh.py
 ```
-in *create_square_mesh.py* geometric settings (#elements and #cells) can be modified
+in *create_square_mesh.py* geometric settings (#elements and #cells) can be modified.
 
 ###  Visualize output in Paraview
 Given an output file *solX.xdmf* and an tags mesh file *tags.xdmf*, apply the following filters:
