@@ -1,27 +1,28 @@
-# Numerical parameters 
-mesh_file            : "data/square_mesh_64_1.xdmf"
-tags_dictionary_file : "data/membrane_tags_dict.pickle"
+# Spatial parameters 
+mesh_file             : "data/reduced_tags_mesh.xdmf"
+tags_dictionary_file  : "data/reduced_tags_dict.pickle"
+mesh_conversion_factor: 0.001 
 fem_order: 1
 
+# Temporal parameters 
 dt         : 0.00002
 time_steps : 200
 
 # Physical parameters 
-C_M     : 0.01
-sigma_i : 1
-sigma_e : 1
-phi_M_init: "(-0.067) * (x[0]*x[0] +  x[1]*x[1]> 0.1)"
+C_M       : 0.01
+sigma_i   : 1
+sigma_e   : 1
+phi_M_init: "(-0.067) * (x[0] > 0)"
 
 # Ionic model
 ionic_model: "HH"
 
 # Solver 
-ksp_type: "cg"
-pc_type:  "hypre"
+ksp_type: "preonly"
+pc_type : "lu"
+ksp_rtol: 1e-6
 
 # Output 
-save_output: True
+save_output: False
 verbose    : False
 
-# TODO
-# mesh_conversion: 1
