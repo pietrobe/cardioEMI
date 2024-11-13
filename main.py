@@ -153,9 +153,22 @@ t1 = time.perf_counter()
 # set ionic models
 ionic_models = dict()
 
+# # multiple ionic models, ECS has to be tag zero
+# if isinstance(params["ionic_model"], dict):
+
 for i in range(N_TAGS - 1):        
-    for j in range(N_TAGS):        
-        ionic_models[(i,j)] = ionic_model_factory(params)
+    for j in range(i+1,N_TAGS):        
+
+        if i == 0:
+            ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
+        else:
+            ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True)
+
+# # single ionic model
+# else:
+#     for i in range(N_TAGS - 1):        
+#         for j in range(i+1,N_TAGS):        
+#             ionic_models[(i,j)] = ionic_model_factory(params)
     
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #

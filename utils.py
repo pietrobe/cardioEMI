@@ -81,7 +81,7 @@ class Read_input_field:
         elif isinstance(self.expression, str):
             return eval(self.expression, {"np": np, "x": x})
         else:
-            raise ValueError("Expression must be a string, int, or float.")            
+            raise ValueError("Expression must be a string, int, or float.")                     
 
 
 def read_input_file(input_yml_file):
@@ -122,9 +122,8 @@ def read_input_file(input_yml_file):
         elif 'T' in config:            
             input_parameters['time_steps'] = int(config['T']/config['dt'])        
         else:
-            print('INPUT ERROR: provide final time T or time_steps in input .yml file.')
-            exit()
-
+            raise SyntaxError(f'INPUT ERROR: provide final time T or time_steps in input .yml file.')
+            
         if 'mesh_conversion_factor' in config: 
             input_parameters['mesh_conversion_factor'] = config['mesh_conversion_factor']
         else:
@@ -136,6 +135,7 @@ def read_input_file(input_yml_file):
         else:
             input_parameters['C_M'] = 1.0
 
+        # conductivities 
         if 'sigma_i' in config: 
             input_parameters['sigma_i'] = config['sigma_i']
         else:
@@ -145,6 +145,13 @@ def read_input_file(input_yml_file):
             input_parameters['sigma_e'] = config['sigma_e']
         else:
             input_parameters['sigma_e'] = 1.0
+
+        # Resistance 
+        if 'R_g' in config: 
+            input_parameters['R_g'] = config['R_g']
+        else:
+            input_parameters['R_g'] = 1.0
+        
                     
         # finite element polynomial order (dafult 1) 
         if 'fem_order' in config: 
@@ -162,10 +169,14 @@ def read_input_file(input_yml_file):
         # ionic model 
         if 'ionic_model' in config: 
             input_parameters['ionic_model'] = config['ionic_model']
+
+            if isinstance(input_parameters['ionic_model'], dict):
+                if input_parameters['ionic_model'].keys() != {"intra_intra", "intra_extra"}:
+                    raise KeyError(f"Use intra_intra and intra_extra input entries!")
+
         else:
             print('WARNING: setting default passive ionic model')
-            input_parameters['ionic_model'] = "Passive"
-
+            input_parameters['ionic_model'] = "Passive"        
             
         ############### solver parameters ###############
 

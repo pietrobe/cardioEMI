@@ -15,11 +15,12 @@ class Ionic_model(ABC):
         pass
 
 # Factory function
-def ionic_model_factory(params):
+def ionic_model_factory(params, intra_intra=False):
     
     # Dictionary mapping strings to classes
-    models = {
+    available_models = {
         "passive": Passive_model,
+        "ohmic"  : Passive_model,
         "hodgkin–huxley": HH_model,
         "hh"            : HH_model,
         "ap"            : AP_model,
@@ -28,24 +29,49 @@ def ionic_model_factory(params):
     }
     
     model_name = params["ionic_model"]   
-    model_name = model_name.lower()
 
-    # Return an instance of the specified model
-    if model_name in models:        
-        return models[model_name](params)
+    if isinstance(model_name, str):
+
+        model_name = model_name.lower()
+
+        # Return an instance of the specified model
+        if model_name in available_models:        
+            return available_models[model_name](params)
+        else:
+            print("Available models: ", available_models)
+            raise ValueError(f"Unknown model name: {model_name}")
+
+    elif isinstance(model_name, dict):
+
+        if intra_intra:
+            model_name = model_name["intra_intra"].lower()
+
+            if model_name in available_models:        
+                return available_models[model_name](params)
+            else:
+                print("Available models: ", available_models)
+                raise ValueError(f"Unknown model name: {model_name}")
+
+        else:
+            model_name = model_name["intra_extra"].lower()
+
+            if model_name in available_models:        
+                return available_models[model_name](params)
+            else:
+                print("Available models: ", available_models)
+                raise ValueError(f"Unknown model name: {model_name}")
     else:
-        print("Available models: ", models)
-        raise ValueError(f"Unknown model name: {model_name}")
+        raise ValueError(f"Unknown ionic model type")
 
 
-# I_ch = phi_M
+# I_ch = phi_M / R_g
 class Passive_model(Ionic_model):
     
     def __str__(self):
         return f'Passive'
         
     def _eval(self, phi_M):                 
-        return phi_M
+        return (1.0/self.params["R_g"]) * phi_M
 
 
 # Hodgkin–Huxley
