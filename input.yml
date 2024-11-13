@@ -12,10 +12,13 @@ time_steps : 200
 C_M       : 0.01
 sigma_i   : 1
 sigma_e   : 1
+R_g       : 0.1
 phi_M_init: "(-0.067) * (x[0] > 0)"
 
 # Ionic model
-ionic_model: "HH"
+ionic_model: 
+  intra_intra: "Passive"
+  intra_extra: "HH"
 
 # Solver 
 ksp_type: "preonly"
@@ -23,6 +26,6 @@ pc_type : "lu"
 ksp_rtol: 1e-6
 
 # Output 
-save_output: False
+save_output: True
 verbose    : False
 
