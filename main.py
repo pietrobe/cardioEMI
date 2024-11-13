@@ -32,8 +32,6 @@ comm = MPI.COMM_WORLD
 if comm.rank == 0: print("Processing input file:", argv[1])      
 params = read_input_file(argv[1])
 
-print(params['tags_dictionary_file'])
-
 # aliases
 mesh_file = params["mesh_file"]
 dt        = params["dt"]
@@ -153,9 +151,6 @@ t1 = time.perf_counter()
 # set ionic models
 ionic_models = dict()
 
-# # multiple ionic models, ECS has to be tag zero
-# if isinstance(params["ionic_model"], dict):
-
 for i in range(N_TAGS - 1):        
     for j in range(i+1,N_TAGS):        
 
@@ -163,12 +158,6 @@ for i in range(N_TAGS - 1):
             ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
         else:
             ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True)
-
-# # single ionic model
-# else:
-#     for i in range(N_TAGS - 1):        
-#         for j in range(i+1,N_TAGS):        
-#             ionic_models[(i,j)] = ionic_model_factory(params)
     
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
@@ -404,8 +393,16 @@ if comm.rank == 0:
     print("P ="       , params["P"])
     print("ksp_type =", params["ksp_type"])
     print("pc_type =" , params["pc_type"] )
-    print("average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
+    print("Average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
     print("Global #DoFs =", b.getSize())
+    
+    if isinstance(params["ionic_model"], dict):
+        print("Ionic models:")
+        for key, value in params["ionic_model"].items():
+            print(f"  {key}: {value}")
+    else:
+        print("Ionic model:", params['ionic_model'])        
+
 
     print("\n#-------TIME ELAPSED-------#\n")
     print(f"Assembly time:      {max_local_assemble_time:.3f} seconds")
