@@ -12,9 +12,7 @@ from petsc4py import PETSc
 from utils             import *
 from ionic_model       import *
 
-start_time = time.perf_counter()
-    
-# Options for the fenicsx form compiler optimization
+    # Options for the fenicsx form compiler optimization
 cache_dir       = f"{str(Path.cwd())}/.cache"
 compile_options = ["-Ofast","-march=native"]
 jit_parameters  = {"cffi_extra_compile_args"  : compile_options,
@@ -24,6 +22,8 @@ jit_parameters  = {"cffi_extra_compile_args"  : compile_options,
 #----------------------------------------#
 #     PARAMETERS AND SOLVER SETTINGS     #
 #----------------------------------------#
+
+start_time = time.perf_counter()
 
 # MPI communicator
 comm = MPI.COMM_WORLD 
@@ -49,7 +49,6 @@ assemble_time = 0
 #          MESH         #
 #-----------------------#
 
-t1 = time.perf_counter()
 if comm.rank == 0: print("Input mesh file:", mesh_file)       
 
 with open(params["tags_dictionary_file"], "rb") as f:
@@ -62,7 +61,7 @@ N_TAGS = len(membrane_tags)
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     # Read mesh and cell tags
     mesh       = xdmf.read_mesh(ghost_mode=dfx.mesh.GhostMode.shared_facet)
-    subdomains = xdmf.read_meshtags(mesh, name="cell_tags")
+    subdomains = xdmf.read_meshtags(mesh, name="cell_tags")    
 
     # Create facet-to-cell connectivity
     mesh.topology.create_connectivity(mesh.topology.dim-1, mesh.topology.dim)
@@ -70,11 +69,14 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     # Also the identity is needed
     mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim)
 
-# Read facet tags
-with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     boundaries = xdmf.read_meshtags(mesh, name="facet_tags")
 
-if comm.rank == 0: print(f"Read mesh time: {time.perf_counter()-t1:.2f}")
+# Scale mesh
+mesh.geometry.x[:] *= params["mesh_conversion_factor"]
+
+# timers
+if comm.rank == 0: print(f"Reading input time: {time.perf_counter() - start_time:.2f}")
+t1 = time.perf_counter()
 
 # Define integral measures
 dx = ufl.Measure("dx", subdomain_data=subdomains) # Cell integrals
@@ -144,9 +146,8 @@ for i in range(N_TAGS):
 
     restriction.append(restriction_Vi_Omega_i)
 
-
-if comm.rank == 0: print(f"Creating FEM spaces and restrictions: {time.perf_counter() - start_time:.2f}")
-
+# timers
+if comm.rank == 0: print(f"Creating FEM spaces and restrictions: {time.perf_counter() - t1:.2f}")
 t1 = time.perf_counter()
 
 # set ionic models
@@ -206,19 +207,20 @@ for i in range(N_TAGS):
 # Convert form to dolfinx form
 a = dfx.fem.form(a, jit_options=jit_parameters)
 
+# timers
 if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f}")
+t1 = time.perf_counter() 
 
 #---------------------------#
 #      MATRIX ASSEMBLY      #
 #---------------------------#
-t1 = time.perf_counter() 
 
 # Assemble the block linear system matrix
 A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction), bcs=[bc_point])
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
-if comm.rank == 0: print(f"Assembling A: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Assembling matrix A: {time.perf_counter() - t1:.2f}")
 
 # Save A
 # dump(A, 'output/Amat')
@@ -329,25 +331,23 @@ for time_step in range(params["time_steps"]):
     b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, restriction=restriction, bcs=[bc_point]) # Assemble RHS vector
     
     # dump(b, 'output/bvec')
-
-    assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
-    
+        
     if time_step == 0:
         # Create solution vector
         sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+
+    assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
     
     # Solve the system
     t1 = time.perf_counter() # Timestamp for solver time-lapse
     ksp.solve(b, sol_vec)
-
+        
     # store iterisons 
     ksp_iterations.append(ksp.getIterationNumber())
 
     # Update ghost values
     sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-
-    solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
-
+    
     # Extract sub-components of solution
     dofmap_list = (N_TAGS) * [V.dofmap]
     with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(sol_vec, dofmap_list, restriction) as uij_wrapper:
@@ -366,7 +366,9 @@ for time_step in range(params["time_steps"]):
 
     for uh in uh_list:
         v.x.array[:] += uh.x.array[:]     
-    
+
+    solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
+
     if params["save_output"]:               
         for i in range(N_TAGS):
             out_list[i].write_function(uh_list[i], t)          
@@ -402,7 +404,6 @@ if params["save_output"]:
     if comm.rank == 0: print("\nSolution saved in output")
     
     for i in range(N_TAGS):
-
         out_list[i].close()
 
     out_v.close()
