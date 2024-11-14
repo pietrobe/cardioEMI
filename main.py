@@ -83,8 +83,8 @@ dx = ufl.Measure("dx", subdomain_data=subdomains) # Cell integrals
 dS = ufl.Measure("dS", subdomain_data=boundaries) # Facet integrals
 
 # Read physical constants
-sigma_i = dfx.fem.Constant(mesh, dfx.default_scalar_type(params["sigma_i"]))
-sigma_e = dfx.fem.Constant(mesh, dfx.default_scalar_type(params["sigma_e"]))
+sigma_i = read_input_field(params['sigma_i'], mesh=mesh)
+sigma_e = read_input_field(params['sigma_e'], mesh=mesh)
 tau     = dt/params["C_M"]
 
 #------------------------------------------#
