@@ -176,6 +176,7 @@ for i in range(N_TAGS):
 
     a_i = []
 
+    # membranes tags for cell tag i 
     membrane_i = membrane_tags[i]
 
     if i == 0:
@@ -371,7 +372,7 @@ for time_step in range(params["time_steps"]):
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
-    if params["save_output"]:               
+    if params["save_output"] and time_step % params["save_interval"] == 0:               
         for i in range(N_TAGS):
             out_list[i].write_function(uh_list[i], t)          
 
