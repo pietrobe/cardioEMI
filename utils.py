@@ -5,6 +5,7 @@ import dolfinx      as dfx
 import scipy.sparse as sparse
 import numpy        as np
 import numpy.typing as npt
+import ufl
 import os
 import yaml
 import pickle 
@@ -26,6 +27,28 @@ class Read_input_field:
             raise ValueError("Expression must be a string, int, or float.")                     
 
 
+# Create input field based on type and value
+def read_input_field(expression: Union[str, float, int], mesh=None):
+
+    if isinstance(expression, (int, float)):
+        return float(expression)    
+
+    elif isinstance(expression, str):
+        # Create a context for eval, including necessary objects
+        context = {"np": np, "ufl": ufl}
+        
+        # If mesh is provided, add x as the spatial coordinate
+        if mesh is not None:
+            x = ufl.SpatialCoordinate(mesh)
+            context["x"] = x
+
+        # Now, evaluate the expression in this context
+        return eval(expression, context)
+    
+    else:
+        raise ValueError("Expression must be a string, int, or float.")
+
+# read yml file
 def read_input_file(input_yml_file):
         
         # read input yml file
@@ -119,8 +142,8 @@ def read_input_file(input_yml_file):
         if 'phi_M_init' in config: 
             input_parameters['phi_M_init'] = config['phi_M_init']
         else:
-            print('WARNING: initial membrane potential set to 1, set phi_M_init in input file for user defined one.')
-            input_parameters['phi_M_init'] = "1"
+            raise KeyError(f"Set phi_M_init in input file!")
+            
 
         # ionic model 
         if 'ionic_model' in config: 
