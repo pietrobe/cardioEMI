@@ -1,5 +1,6 @@
 import numpy    as np
 import dolfinx  as dfx
+from collections import defaultdict
 import sys
 
 def update_status(message):

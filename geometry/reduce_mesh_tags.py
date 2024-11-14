@@ -1,6 +1,5 @@
 import dolfinx  as dfx
 from mpi4py      import MPI
-from collections import defaultdict
 from geometry    import *
 import pickle 
 
