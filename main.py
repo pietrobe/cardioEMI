@@ -34,6 +34,7 @@ params = read_input_file(argv[1])
 
 # aliases
 mesh_file = params["mesh_file"]
+ECS_TAG   = params["ECS_TAG"]
 dt        = params["dt"]
 
 # get expression of initial mmebrane potential
@@ -52,8 +53,9 @@ if comm.rank == 0: print("Input mesh file:", mesh_file)
 with open(params["tags_dictionary_file"], "rb") as f:
     membrane_tags = pickle.load(f)
 
-# set number of tags 
-N_TAGS = len(membrane_tags)
+# set tags info
+TAGS   = sorted(membrane_tags.keys())
+N_TAGS = len(TAGS)
 
 # Read mesh
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
@@ -90,51 +92,58 @@ tau     = dt/params["C_M"]
 #------------------------------------------#
 V = dfx.fem.functionspace(mesh, ("Lagrange", params["P"])) # Space for functions defined on the entire mesh
 
-# vector for space, following ordering: Extra, Intra1, Intra2,...,IntraN_CELLS
-V_list = []
+# vector for space, one for each tag
+V_dict = dict()
 
 # trial and test functions
-u_list = []
-v_list = []
+u_dict = dict()
+v_dict = dict()
 
 # list for storing the solutions and forcing factors
-uh_list  = []
-vij_list = dict()
-fg_list  = dict()
+uh_dict  = dict()
+vij_dict = dict()
+fg_dict  = dict()
 
 # to store all solutions
 v = dfx.fem.Function(V)
 
-for i in range(N_TAGS):
+for i in TAGS:
 
     V_i = V.clone()
 
-    V_list.append(V_i)
-    u_list.append(ufl.TrialFunction(V_i))
-    v_list.append( ufl.TestFunction(V_i))
-    uh_list.append(dfx.fem.Function(V_i))
+    V_dict[i]  = V_i
+    u_dict[i]  = ufl.TrialFunction(V_i)
+    v_dict[i]  =  ufl.TestFunction(V_i)
+    uh_dict[i] =  dfx.fem.Function(V_i)
     
-    # v_01, v_02, v_03...; v_12, v_13,...;                        
-    for j in range(N_TAGS): 
+    # v_ij con i < j to avoid repetions
+    for j in TAGS:
         if i < j:
             # Membrane potential and forcing term function
-            vij_list[(i,j)] = dfx.fem.Function(V) 
-            fg_list[(i,j)]  = dfx.fem.Function(V)
+            vij_dict[(i,j)] = dfx.fem.Function(V) 
+            fg_dict[(i,j)]  = dfx.fem.Function(V)
         
 # init vij using initial membrane potential        
-for j in range(1,N_TAGS):
-    vij_list[(0,j)].interpolate(v_init)    
-    v.x.array[:] += vij_list[(0,j)].x.array[:] 
+for i in TAGS:    
+
+        # interpolate v_init in intra_extra, intra_intra is 0 by default
+    if i < ECS_TAG:    
+        vij_dict[(i,ECS_TAG)].interpolate(v_init)    
+        v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:] 
+
+    elif i > ECS_TAG:
+        vij_dict[(ECS_TAG,i)].interpolate(v_init)    
+        v.x.array[:] += vij_dict[(ECS_TAG,i)].x.array[:] 
 
 ##### Restrictions #####
 restriction = []
 
-for i in range(N_TAGS):
+for i in TAGS:
 
-    V_i = V_list[i]
+    V_i = V_dict[i]
 
     # Get indices of the cells of the intra- and extracellular subdomains
-    cells_Omega_i = subdomains.indices[subdomains.values==i]
+    cells_Omega_i = subdomains.indices[subdomains.values == i]
 
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
@@ -151,45 +160,46 @@ t1 = time.perf_counter()
 # set ionic models
 ionic_models = dict()
 
-for i in range(N_TAGS - 1):        
-    for j in range(i+1,N_TAGS):        
+for i in TAGS:        
+    for j in TAGS:
 
-        if i == 0:
-            ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
-        else:
-            ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True)
-    
+        if i < j:        
+            if i == ECS_TAG or j == ECS_TAG:
+                ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
+            else:
+                ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True)
+        
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
 
 # BCs (use bcs=[bc_point] in block_assembly)
 zero     = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))
-bc_dofs  = dfx.fem.locate_dofs_topological(V_list[0], boundaries.dim, [0])
-bc_point = dfx.fem.dirichletbc(zero, bc_dofs, V_list[0]) 
+bc_dofs  = dfx.fem.locate_dofs_topological(V_dict[ECS_TAG], boundaries.dim, [ECS_TAG])
+bc_point = dfx.fem.dirichletbc(zero, bc_dofs, V_dict[ECS_TAG]) 
 
 # bilinear form
 a = []
 
 # assemble block form
-for i in range(N_TAGS):
+for i in TAGS:
 
     a_i = []
 
     # membranes tags for cell tag i 
     membrane_i = membrane_tags[i]
 
-    if i == 0:
+    if i == ECS_TAG:
         sigma = sigma_e # extra-cellular 
 
     else:
         sigma = sigma_i # intra-cellular         
 
-    v_i = v_list[i]
+    v_i = v_dict[i]
     
-    for j in range(N_TAGS):
+    for j in TAGS:
         
-        u_j  = u_list[j]
+        u_j  = u_dict[j]
 
         membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))   
 
@@ -259,7 +269,7 @@ if params["save_output"]:
     
     out_list = []
 
-    for i in range(N_TAGS):        
+    for i in TAGS:        
 
         output_filename = "output/sol_" + str(i) + ".xdmf"
         out_i = dfx.io.XDMFFile(mesh.comm, output_filename, "w")
@@ -298,15 +308,15 @@ for time_step in range(params["time_steps"]):
     # Update and assemble vector that is the RHS of the linear system
     t1 = time.perf_counter() # Timestamp for assembly time-lapse      
     
-    for i in range(N_TAGS):
+    for i in TAGS:
 
         membrane_i = membrane_tags[i]
         
-        v_i = v_list[i]
+        v_i = v_dict[i]
 
         L_i = 0    
 
-        for j in range(N_TAGS):                        
+        for j in TAGS:                        
             
             if i != j:
             
@@ -315,17 +325,17 @@ for time_step in range(params["time_steps"]):
                 if i < j:
                     ij_tuple = (i,j)                                        
                     L_coeff  = 1
-                    with vij_list[ij_tuple].vector.localForm() as v_local:
+                    with vij_dict[ij_tuple].vector.localForm() as v_local:
                         I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])                                            
                 else:
                     ij_tuple = (j,i)
                     L_coeff  = -1                    
                     
-                with fg_list[ij_tuple].vector.localForm() as fg_local, vij_list[ij_tuple].vector.localForm() as v_local:
+                with fg_dict[ij_tuple].vector.localForm() as fg_local, vij_dict[ij_tuple].vector.localForm() as v_local:
 
                     fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
 
-                L_i += L_coeff * inner(fg_list[ij_tuple], v_i('+')) * dS(membrane_ij)
+                L_i += L_coeff * inner(fg_dict[ij_tuple], v_i('+')) * dS(membrane_ij)
                                 
         L_list.append(L_i)
 
@@ -354,27 +364,27 @@ for time_step in range(params["time_steps"]):
     # Extract sub-components of solution
     dofmap_list = (N_TAGS) * [V.dofmap]
     with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(sol_vec, dofmap_list, restriction) as uij_wrapper:
-        for ui_ue_wrapper_local, component in zip(uij_wrapper, tuple(uh_list)): 
+        for ui_ue_wrapper_local, component in zip(uij_wrapper, tuple(uh_dict.values())): 
             with component.vector.localForm() as component_local:
                 component_local[:] = ui_ue_wrapper_local
 
-    for i in range(N_TAGS):
-        for j in range(N_TAGS):
+    for i in TAGS:
+        for j in TAGS:
             if i < j:                
-                vij_list[(i,j)].x.array[:] = uh_list[i].x.array - uh_list[j].x.array
+                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
 
     # reset v
     with v.vector.localForm() as v_local:
         v_local.set(0)
 
-    for uh in uh_list:
-        v.x.array[:] += uh.x.array[:]     
+    for i in TAGS:
+        v.x.array[:] += uh_dict[i].x.array[:]     
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
     if params["save_output"] and time_step % params["save_interval"] == 0:               
-        for i in range(N_TAGS):
-            out_list[i].write_function(uh_list[i], t)          
+        for i in TAGS:
+            out_list[i].write_function(uh_dict[i], t)          
 
         out_v.write_function(v, t)
 
@@ -414,7 +424,7 @@ if comm.rank == 0:
 if params["save_output"]:    
     if comm.rank == 0: print("\nSolution saved in output")
     
-    for i in range(N_TAGS):
+    for i in TAGS:
         out_list[i].close()
 
     out_v.close()

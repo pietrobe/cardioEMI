@@ -1,11 +1,13 @@
-import dolfinx  as dfx
+from mpi4py   import MPI
+from typing   import Union
 from petsc4py import PETSc
+import dolfinx      as dfx
 import scipy.sparse as sparse
 import numpy        as np
-from typing import Union
 import numpy.typing as npt
 import os
 import yaml
+import pickle 
 
 
 # Assign intial membrane potential
@@ -49,6 +51,20 @@ def read_input_file(input_yml_file):
         else:
             print('INPUT ERROR: provide tags_dictionary_file field in input .yml file')
             return
+
+        # get ECC tag if specified, otherwise use the minimum
+        if 'ECS_TAG' in config:                  
+            input_parameters['ECS_TAG'] = config['ECS_TAG']                                        
+        else:
+            
+            with open(config["tags_dictionary_file"], "rb") as f:
+                membrane_tags = pickle.load(f)
+
+            input_parameters['ECS_TAG'] = min(membrane_tags.keys())          
+            
+            # Read input file 
+            if MPI.COMM_WORLD .rank == 0: print("ECS tag not specified, using minimum one:", input_parameters['ECS_TAG'])  
+            
                 
         ######### problem #########
         if 'dt' in config:
