@@ -1,22 +1,17 @@
 import dolfinx  as dfx
 from mpi4py      import MPI
 from collections import defaultdict
-from utils       import *
+from geometry    import *
 import pickle 
 
 mesh_file     = "../data/mesh.xdmf"
 out_mesh_file = "../data/reduced_tags_mesh.xdmf"
 out_dict_file = "../data/reduced_tags_dict.pickle"
 
-N_TAGS = 3
-
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     # Read mesh and cell tags
     mesh       = xdmf.read_mesh(ghost_mode=dfx.mesh.GhostMode.shared_facet,name='mesh')    
     subdomains = xdmf.read_meshtags(mesh, name='mesh')        
-
-    # mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-
 
 num_cells = mesh.topology.index_map(mesh.topology.dim).size_local
 subdomain_values = subdomains.values 
@@ -33,6 +28,7 @@ for i in range(num_cells):
         else:
             subdomain_values[i] = 1
 
+N_TAGS = len(set(subdomain_values))
 
 print("\nMarking facets", flush=True)
 boundaries, membrane_tags_dict = get_facet_tags_and_dictionary(mesh, subdomains, N_TAGS)

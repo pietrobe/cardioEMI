@@ -6,7 +6,7 @@ fem_order: 1
 
 # Temporal parameters 
 dt         : 0.00002
-time_steps : 20
+time_steps : 600
 
 # Physical parameters 
 C_M       : 0.01
@@ -26,6 +26,7 @@ pc_type : "lu"
 ksp_rtol: 1e-6
 
 # Output 
-save_output: True
-verbose    : False
+save_output  : True
+save_interval: 5
+verbose      : False
 
