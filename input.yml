@@ -6,7 +6,7 @@ fem_order: 1
 
 # Temporal parameters 
 dt         : 0.00002
-time_steps : 500
+time_steps : 10
 
 # Physical parameters 
 C_M       : 0.01
@@ -21,9 +21,9 @@ ionic_model:
   intra_extra: "HH"
 
 # Solver 
-ksp_type: "preonly"
-pc_type : "lu"
-ksp_rtol: 1e-6
+ksp_type: "cg"
+pc_type : "hypre"
+ksp_rtol: 1e-7
 
 # Output 
 save_output  : True

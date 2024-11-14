@@ -1,6 +1,9 @@
 # Outptut folders
 output
 
+# input file for tests
+input_test.yml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

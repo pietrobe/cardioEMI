@@ -259,6 +259,9 @@ if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":
     opts.setValue('ksp_rtol', params["ksp_rtol"])
     opts.setValue('ksp_converged_reason', None)
 
+if params['pc_type'] == "hypre" and mesh.geometry.dim == 3:
+    opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.7)
+
 ksp.setFromOptions()
 
 # intial time
