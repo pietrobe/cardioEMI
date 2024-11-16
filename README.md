@@ -34,12 +34,21 @@ pip install multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@
 ```
 mpirun -n 1 python3 -u main.py input.yml
 ```
-modifying *input.yml* fordifferent input data. Parallel execution can be obtain with mpirun -n X.
+modifying *input.yml* for different input data. Parallel execution can be obtain with mpirun -n X.
 
-### Mesh creation 
-An square input mesh can be created via 
+### Geometry and tagging
+In the input .yml file two input files have to be provided:
+- path to an XDMF mesh with volume and facets tags 
+- path to a dictionary file containing the connectivity map between cells and facets
+
+Each volume tag correspond to a FEM space, thus it makes sense to choose the minimum number of volume tags, so that there are no neighbour cells with the same tag. The ECS_TAG can be provided in the input .yml file, otherwise the minimum between all the volume tags will be used. 
+
+The *geometry* directory contains scripts to generate tagged meshes and connectivity dictionaries. For example, the script *geometry/tag_facets.py* produces the needed input files given a volume-tagged cell.
+
+An square input mesh can be created via
 
 ```
+cd geometry
 python3 create_square_mesh.py
 ```
 in *create_square_mesh.py* geometric settings (#elements and #cells) can be modified.

@@ -83,8 +83,8 @@ dx = ufl.Measure("dx", subdomain_data=subdomains) # Cell integrals
 dS = ufl.Measure("dS", subdomain_data=boundaries) # Facet integrals
 
 # Read physical constants
-sigma_i = dfx.fem.Constant(mesh, dfx.default_scalar_type(params["sigma_i"]))
-sigma_e = dfx.fem.Constant(mesh, dfx.default_scalar_type(params["sigma_e"]))
+sigma_i = read_input_field(params['sigma_i'], mesh=mesh)
+sigma_e = read_input_field(params['sigma_e'], mesh=mesh)
 tau     = dt/params["C_M"]
 
 #------------------------------------------#
@@ -258,6 +258,9 @@ if params["verbose"]:
 if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":    
     opts.setValue('ksp_rtol', params["ksp_rtol"])
     opts.setValue('ksp_converged_reason', None)
+
+if params['pc_type'] == "hypre" and mesh.geometry.dim == 3:
+    opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.7)
 
 ksp.setFromOptions()
 

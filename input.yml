@@ -1,19 +1,19 @@
 # Spatial parameters 
-mesh_file             : "data/reduced_tags_mesh.xdmf"
-tags_dictionary_file  : "data/reduced_tags_dict.pickle"
-mesh_conversion_factor: 0.001 
+mesh_file             : "data/square_mesh_64_1.xdmf"
+tags_dictionary_file  : "data/membrane_tags_dict.pickle"
+mesh_conversion_factor: 1 
 fem_order: 1
 
 # Temporal parameters 
 dt         : 0.00002
-time_steps : 400
+time_steps : 10
 
 # Physical parameters 
 C_M       : 0.01
-sigma_i   : 1
+sigma_i   : "ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
 sigma_e   : 1
 R_g       : 0.1
-phi_M_init: "(-0.067) * (x[0] > 0)"
+phi_M_init: "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
 
 # Ionic model
 ionic_model: 
@@ -21,9 +21,9 @@ ionic_model:
   intra_extra: "HH"
 
 # Solver 
-ksp_type: "preonly"
-pc_type : "lu"
-ksp_rtol: 1e-6
+ksp_type: "cg"
+pc_type : "hypre"
+ksp_rtol: 1e-7
 
 # Output 
 save_output  : True
