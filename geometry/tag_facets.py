@@ -1,15 +1,14 @@
 import dolfinx  as dfx
 from mpi4py      import MPI
-from collections import defaultdict
 from geometry    import *
 import pickle 
 
 # input mesh
-mesh_file_volume_tagged = "../data/mesh.xdmf"
+mesh_file_volume_tagged = "../meshes_test/2D_config5.xdmf"
 
 # output mesh and dictionary
-mesh_file_tagged       = "../data/tagged_mesh.xdmf"
-connectivity_dict_file = "../data/connectivity_dict.pickle"
+mesh_file_tagged       = "../meshes_test/2D_config5_tagged.xdmf"
+connectivity_dict_file = "../meshes_test/2D_config5_connectivity.pickle"
 
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_volume_tagged, 'r') as xdmf:
     # Read mesh and cell tags
@@ -20,7 +19,7 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_volume_tagged, 'r') as xdmf:
 # MESH PROCESSING HERE IF NEEDED #
 ##################################
 
-N_TAGS = len(set(subdomain_values))
+N_TAGS = len(set(subdomains.values))
 
 print("\nMarking facets", flush=True)
 boundaries, membrane_tags_dict = get_facet_tags_and_dictionary(mesh, subdomains, N_TAGS)
@@ -36,4 +35,3 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_tagged, "w") as mesh_file:
 # Save to a file
 with open(connectivity_dict_file, "wb") as f:
     pickle.dump(membrane_tags_dict, f)   
-
