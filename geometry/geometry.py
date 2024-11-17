@@ -1,5 +1,6 @@
 import numpy    as np
 import dolfinx  as dfx
+import meshio
 from collections import defaultdict
 import sys
 
@@ -7,6 +8,22 @@ def update_status(message):
     sys.stdout.write(f'\r{message}')
     sys.stdout.flush()
 
+def vtu_to_xdmf(basename, tagname, case_3d=False):
+    vtu_file = basename + ".vtu"
+    msh = meshio.read(vtu_file)
+
+    for cell in msh.cells:
+        cells = cell.data
+    
+    for key in msh.cell_data_dict[tagname].keys():
+        mesh_data = msh.cell_data_dict[tagname][key]
+
+    if case_3d:
+        converted_mesh = meshio.Mesh(points=msh.points, cells={"tetra": cells}, cell_data={"cell_tags" : [mesh_data]})
+    else:
+        converted_mesh = meshio.Mesh(points=msh.points, cells={"triangle": cells}, cell_data={"cell_tags" : [mesh_data]})
+
+    meshio.write(basename + ".xdmf", converted_mesh)
 
 def get_facet_tags_and_dictionary(mesh: dfx.mesh.Mesh, subdomains: dfx.mesh.MeshTags, N_TAGS: int) -> dfx.mesh.MeshTags:    
 
