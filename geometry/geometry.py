@@ -6,16 +6,16 @@ import sys
 import xml.etree.ElementTree as ET
 
 def update_xdmf_name(filename):
-    # Step 1: Parse the XML
+    # Parse the XML
     tree = ET.parse(filename)
     root = tree.getroot()
 
-    # Step 2: Find the Grid element and modify its name attribute
+    # Find the Grid element and modify its name attribute
     for grid in root.iter("Grid"):
         if grid.attrib.get("Name") == "Grid":  # Check if the name is "Grid"
             grid.attrib["Name"] = "mesh"  # Update to "mesh"
 
-    # Step 3: Save the updated XML back to the file
+    # Save the updated XML back to the file
     tree.write(filename, encoding="UTF-8", xml_declaration=True)
 
     print("Grid name updated")
@@ -51,6 +51,12 @@ def vtu_to_xdmf(basename, tagname, case_3d=False):
         mesh_data = msh.cell_data_dict[tagname][key]
 
     if case_3d:
+        mesh_data = np.where(mesh_data == 100, 0, mesh_data)
+        mesh_data = np.where((mesh_data > 0) & (mesh_data < 117), 1, mesh_data)
+        mesh_data = np.where((mesh_data >= 117) & (mesh_data < 131), 2, mesh_data)
+        mesh_data = np.where((mesh_data >= 131) & (mesh_data < 147), 3, mesh_data)
+        mesh_data = np.where((mesh_data >= 147) & (mesh_data < 165), 4, mesh_data)
+        mesh_data = np.where(mesh_data >= 165, 5, mesh_data)
         points = msh.points
         converted_mesh = meshio.Mesh(points=points, cells={"tetra": cells}, cell_data={"cell_tags" : [mesh_data]})
     else:
