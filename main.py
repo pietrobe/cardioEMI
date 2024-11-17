@@ -12,7 +12,7 @@ from petsc4py import PETSc
 from utils             import *
 from ionic_model       import *
 
-    # Options for the fenicsx form compiler optimization
+# Options for the fenicsx form compiler optimization
 cache_dir       = f"{str(Path.cwd())}/.cache"
 compile_options = ["-Ofast","-march=native"]
 jit_parameters  = {"cffi_extra_compile_args"  : compile_options,
@@ -34,7 +34,11 @@ params = read_input_file(argv[1])
 
 # aliases
 mesh_file = params["mesh_file"]
+
 ECS_TAG   = params["ECS_TAG"]
+if ECS_TAG is None:
+    ECS_TAG = 0      # set default extracell tag to 0 if it has not been set
+
 dt        = params["dt"]
 
 # get expression of initial mmebrane potential
