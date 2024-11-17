@@ -25,11 +25,12 @@ def update_status(message):
     sys.stdout.flush()
 
 def clean_2D_mesh(mesh):
-    # Step 2: Identify duplicate nodes
+    # Function to remove duplicate facies
+    # Identify duplicate nodes
     points = mesh.points
     unique_points, inverse_indices = np.unique(points.round(decimals=12), axis=0, return_inverse=True)
 
-    # Step 3: Update connectivity
+    # Update connectivity
     # Replace old node indices with unique node indices
     new_connectivity = []
     for cell_block in mesh.cells:
