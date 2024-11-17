@@ -4,11 +4,11 @@ from geometry    import *
 import pickle 
 
 # input mesh
-mesh_file_volume_tagged = "../meshes_test/2D_config5.xdmf"
+mesh_file_volume_tagged = "../meshes_test/test_physio_3D.xdmf" #"meshes_test/2D_config5.xdmf"
 
 # output mesh and dictionary
-mesh_file_tagged       = "../meshes_test/2D_config5_tagged.xdmf"
-connectivity_dict_file = "../meshes_test/2D_config5_connectivity.pickle"
+mesh_file_tagged       = "../meshes_test/test_physio_3D_tagged.xdmf" #"meshes_test/2D_config5_tagged.xdmf"
+connectivity_dict_file = "../meshes_test/test_physio_3D_connectivity.pickle" #"meshes_test/2D_config5_connectivity.pickle"
 
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_volume_tagged, 'r') as xdmf:
     # Read mesh and cell tags
