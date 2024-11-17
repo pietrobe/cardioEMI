@@ -3,10 +3,41 @@ import dolfinx  as dfx
 import meshio
 from collections import defaultdict
 import sys
+import xml.etree.ElementTree as ET
+
+def update_xdmf_name(filename):
+    # Step 1: Parse the XML
+    tree = ET.parse(filename)
+    root = tree.getroot()
+
+    # Step 2: Find the Grid element and modify its name attribute
+    for grid in root.iter("Grid"):
+        if grid.attrib.get("Name") == "Grid":  # Check if the name is "Grid"
+            grid.attrib["Name"] = "mesh"  # Update to "mesh"
+
+    # Step 3: Save the updated XML back to the file
+    tree.write(filename, encoding="UTF-8", xml_declaration=True)
+
+    print("Grid name updated")
 
 def update_status(message):
     sys.stdout.write(f'\r{message}')
     sys.stdout.flush()
+
+def clean_2D_mesh(mesh):
+    # Step 2: Identify duplicate nodes
+    points = mesh.points
+    unique_points, inverse_indices = np.unique(points.round(decimals=12), axis=0, return_inverse=True)
+
+    # Step 3: Update connectivity
+    # Replace old node indices with unique node indices
+    new_connectivity = []
+    for cell_block in mesh.cells:
+        if cell_block.type == "triangle":  # Process triangle cells
+            new_cell_data = inverse_indices[cell_block.data]
+            new_connectivity.append(new_cell_data)
+
+    return unique_points, new_connectivity[0]
 
 def vtu_to_xdmf(basename, tagname, case_3d=False):
     vtu_file = basename + ".vtu"
@@ -19,9 +50,11 @@ def vtu_to_xdmf(basename, tagname, case_3d=False):
         mesh_data = msh.cell_data_dict[tagname][key]
 
     if case_3d:
-        converted_mesh = meshio.Mesh(points=msh.points, cells={"tetra": cells}, cell_data={"cell_tags" : [mesh_data]})
+        points = msh.points
+        converted_mesh = meshio.Mesh(points=points, cells={"tetra": cells}, cell_data={"cell_tags" : [mesh_data]})
     else:
-        converted_mesh = meshio.Mesh(points=msh.points, cells={"triangle": cells}, cell_data={"cell_tags" : [mesh_data]})
+        points, cells = clean_2D_mesh(msh)
+        converted_mesh = meshio.Mesh(points=points, cells={"triangle": cells}, cell_data={"cell_tags" : [mesh_data]})
 
     meshio.write(basename + ".xdmf", converted_mesh)
 
