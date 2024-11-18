@@ -34,7 +34,7 @@ pip install multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@
 ```
 mpirun -n 1 python3 -u main.py input.yml
 ```
-modifying *input.yml* for different input data. Parallel execution can be obtain with mpirun -n X.
+modifying `input.yml` for different input data. Parallel execution can be obtain with `mpirun -n X`.
 
 ### Geometry and tagging
 In the input .yml file two input files have to be provided:
@@ -43,7 +43,7 @@ In the input .yml file two input files have to be provided:
 
 Each volume tag correspond to a FEM space, thus it makes sense to choose the minimum number of volume tags, so that there are no neighbour cells with the same tag. The ECS_TAG can be provided in the input .yml file, otherwise the minimum between all the volume tags will be used. 
 
-The *geometry* directory contains scripts to generate tagged meshes and connectivity dictionaries. For example, the script *geometry/tag_facets.py* produces the needed input files given a volume-tagged cell.
+The *geometry* directory contains scripts to generate tagged meshes and connectivity dictionaries. For example, the script `geometry/tag_facets.py` produces the needed input files given a volume-tagged cell.
 
 An square input mesh can be created via
 
@@ -54,7 +54,7 @@ python3 create_square_mesh.py
 in *create_square_mesh.py* geometric settings (#elements and #cells) can be modified.
 
 ###  Visualize output in Paraview
-In Paraview *File > Load State...* of *output/bulk_state.pvsm*, selecting the correct path in *Load State Options*, to visualise the bulk potential evolution.
+In Paraview `File > Load State...` of `output/bulk_state.pvsm`, selecting the correct path in *Load State Options*, to visualise the bulk potential evolution.
 
 TODO: membrane potential visualization
 
