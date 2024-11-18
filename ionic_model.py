@@ -10,7 +10,7 @@ class Ionic_model(ABC):
         self.params = params                     
             
     @abstractmethod
-    def _eval(self, phi_M):
+    def _eval(self, v):
         # Abstract method that must be implemented by concrete subclasses.
         pass
 
@@ -64,14 +64,14 @@ def ionic_model_factory(params, intra_intra=False):
         raise ValueError(f"Unknown ionic model type")
 
 
-# I_ch = phi_M / R_g
+# I_ch = v / R_g
 class Passive_model(Ionic_model):
     
     def __str__(self):
         return f'Passive'
         
-    def _eval(self, phi_M):                 
-        return (1.0/self.params["R_g"]) * phi_M
+    def _eval(self, v):                 
+        return (1.0/self.params["R_g"]) * v
 
 
 # Hodgkin–Huxley
@@ -108,15 +108,15 @@ class HH_model(Ionic_model):
         return f'Hodgkin–Huxley'
     
 
-    def _eval(self, phi_M):   
+    def _eval(self, v):   
         
         # update gating variables
         if self.initial_time_step:            
                                 
             # create gating varaibles vectors 
-            self.n = 0 * phi_M + self.n_init
-            self.m = 0 * phi_M + self.m_init
-            self.h = 0 * phi_M + self.h_init            
+            self.n = 0 * v + self.n_init
+            self.m = 0 * v + self.m_init
+            self.h = 0 * v + self.h_init            
 
             # output
             if self.save_png_file: self.init_png()
@@ -124,7 +124,7 @@ class HH_model(Ionic_model):
             self.initial_time_step = False            
 
         else:            
-            self.update_gating_variables(phi_M)  
+            self.update_gating_variables(v)  
 
             # output
             if self.save_png_file: self.save_png()                          
@@ -135,18 +135,18 @@ class HH_model(Ionic_model):
         g_Cl = self.g_Cl_leak
 
         # ionic currents
-        I_ch_Na = g_Na * (phi_M - self.E_Na)
-        I_ch_K  = g_K  * (phi_M - self.E_K)
-        I_ch_Cl = g_Cl * (phi_M - self.E_Cl)     
+        I_ch_Na = g_Na * (v - self.E_Na)
+        I_ch_K  = g_K  * (v - self.E_K)
+        I_ch_Cl = g_Cl * (v - self.E_Cl)     
                 
         return I_ch_Na + I_ch_K + I_ch_Cl      
 
 
-    def update_gating_variables(self, phi_M):           
+    def update_gating_variables(self, v):           
 
         dt_ode = float(self.params['dt'])/self.time_steps_ODE 
 
-        V_M = 1000*(phi_M - self.V_rest) # convert phi_M to mV    
+        V_M = 1000*(v - self.V_rest) # convert v to mV    
         
         alpha_n = 0.01e3*(10.-V_M)/(np.exp((10.-V_M)/10.) - 1.)
         beta_n  = 0.125e3*np.exp(-V_M/80.)
@@ -200,10 +200,10 @@ class AP_model(Ionic_model):
     def __str__(self):
         return f'Aliev-Panfilov'
         
-    def _eval(self, phi_M):                 
+    def _eval(self, v):                 
 
         # TODO
-        I_ion = phi_M
+        I_ion = v
 
         return I_ion
 

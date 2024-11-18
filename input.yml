@@ -13,7 +13,9 @@ C_M       : 0.01
 sigma_i   : "ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
 sigma_e   : 1
 R_g       : 0.1
-phi_M_init: "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
+
+# initial membrane potential
+v_init: "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
 
 # Ionic model
 ionic_model: 
