@@ -1,15 +1,27 @@
 import dolfinx  as dfx
 from mpi4py      import MPI
-from collections import defaultdict
 from geometry    import *
 import pickle 
 
+##########################################
+# QUITE SPECIFIC FOR OUR MESHES FOR NOW  #
+##########################################
+
+mesh_folder = "../meshes_test/" 
+basename    = mesh_folder + "test_physio_3D" #"2D_config5" #"test_physio_3D"
+case_3d     = True
+tagname     = "medit:ref" #"conductivity" #"medit:ref"
+
+vtu_to_xdmf(basename, tagname, case_3d=case_3d)
+
 # input mesh
-mesh_file_volume_tagged = "../data/mesh.xdmf"
+mesh_file_volume_tagged = basename + ".xdmf"
+
+update_xdmf_name(mesh_file_volume_tagged)
 
 # output mesh and dictionary
-mesh_file_tagged       = "../data/tagged_mesh.xdmf"
-connectivity_dict_file = "../data/connectivity_dict.pickle"
+mesh_file_tagged       = basename + "_tagged.xdmf"
+connectivity_dict_file = basename + "_connectivity.pickle"
 
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_volume_tagged, 'r') as xdmf:
     # Read mesh and cell tags
@@ -20,7 +32,7 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_volume_tagged, 'r') as xdmf:
 # MESH PROCESSING HERE IF NEEDED #
 ##################################
 
-N_TAGS = len(set(subdomain_values))
+N_TAGS = len(set(subdomains.values))
 
 print("\nMarking facets", flush=True)
 boundaries, membrane_tags_dict = get_facet_tags_and_dictionary(mesh, subdomains, N_TAGS)
@@ -36,4 +48,3 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file_tagged, "w") as mesh_file:
 # Save to a file
 with open(connectivity_dict_file, "wb") as f:
     pickle.dump(membrane_tags_dict, f)   
-
