@@ -1,12 +1,69 @@
 import numpy    as np
 import dolfinx  as dfx
+import meshio
 from collections import defaultdict
 import sys
+import xml.etree.ElementTree as ET
+
+def update_xdmf_name(filename):
+    # Parse the XML
+    tree = ET.parse(filename)
+    root = tree.getroot()
+
+    # Find the Grid element and modify its name attribute
+    for grid in root.iter("Grid"):
+        if grid.attrib.get("Name") == "Grid":  # Check if the name is "Grid"
+            grid.attrib["Name"] = "mesh"  # Update to "mesh"
+
+    # Save the updated XML back to the file
+    tree.write(filename, encoding="UTF-8", xml_declaration=True)
+
+    print("Grid name updated")
 
 def update_status(message):
     sys.stdout.write(f'\r{message}')
     sys.stdout.flush()
 
+def clean_2D_mesh(mesh):
+    # Function to remove duplicate facies
+    # Identify duplicate nodes
+    points = mesh.points
+    unique_points, inverse_indices = np.unique(points.round(decimals=12), axis=0, return_inverse=True)
+
+    # Update connectivity
+    # Replace old node indices with unique node indices
+    new_connectivity = []
+    for cell_block in mesh.cells:
+        if cell_block.type == "triangle":  # Process triangle cells
+            new_cell_data = inverse_indices[cell_block.data]
+            new_connectivity.append(new_cell_data)
+
+    return unique_points, new_connectivity[0]
+
+def vtu_to_xdmf(basename, tagname, case_3d=False):
+    vtu_file = basename + ".vtu"
+    msh = meshio.read(vtu_file)
+
+    for cell in msh.cells:
+        cells = cell.data
+    
+    for key in msh.cell_data_dict[tagname].keys():
+        mesh_data = msh.cell_data_dict[tagname][key]
+
+    if case_3d:
+        mesh_data = np.where(mesh_data == 100, 0, mesh_data)
+        mesh_data = np.where((mesh_data > 0) & (mesh_data < 117), 1, mesh_data)
+        mesh_data = np.where((mesh_data >= 117) & (mesh_data < 131), 2, mesh_data)
+        mesh_data = np.where((mesh_data >= 131) & (mesh_data < 147), 3, mesh_data)
+        mesh_data = np.where((mesh_data >= 147) & (mesh_data < 165), 4, mesh_data)
+        mesh_data = np.where(mesh_data >= 165, 5, mesh_data)
+        points = msh.points
+        converted_mesh = meshio.Mesh(points=points, cells={"tetra": cells}, cell_data={"cell_tags" : [mesh_data]})
+    else:
+        points, cells = clean_2D_mesh(msh)
+        converted_mesh = meshio.Mesh(points=points, cells={"triangle": cells}, cell_data={"cell_tags" : [mesh_data]})
+
+    meshio.write(basename + ".xdmf", converted_mesh)
 
 def get_facet_tags_and_dictionary(mesh: dfx.mesh.Mesh, subdomains: dfx.mesh.MeshTags, N_TAGS: int) -> dfx.mesh.MeshTags:    
 

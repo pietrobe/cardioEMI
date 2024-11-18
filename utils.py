@@ -1,7 +1,6 @@
 from mpi4py   import MPI
 from typing   import Union
 from petsc4py import PETSc
-import dolfinx      as dfx
 import scipy.sparse as sparse
 import numpy        as np
 import numpy.typing as npt
