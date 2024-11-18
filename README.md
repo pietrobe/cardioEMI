@@ -56,7 +56,7 @@ in *create_square_mesh.py* geometric settings (#elements and #cells) can be modi
 ###  Visualize output in Paraview
 In Paraview `File > Load State...` of `output/bulk_state.pvsm`, selecting the correct path in *Load State Options*, to visualise the bulk potential evolution.
 
-TODO: membrane potential visualization
+Similarly with `output/membrane_state.pvsm` to visualise ECS-ICS membrane potential jump (relying on ECS_TAG = 0).
 
 ### Contributors
 
