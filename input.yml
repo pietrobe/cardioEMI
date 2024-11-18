@@ -6,7 +6,7 @@ fem_order: 1
 
 # Temporal parameters 
 dt         : 0.00002
-time_steps : 10
+time_steps : 50
 
 # Physical parameters 
 C_M       : 0.01
