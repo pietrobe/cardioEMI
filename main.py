@@ -34,11 +34,7 @@ params = read_input_file(argv[1])
 
 # aliases
 mesh_file = params["mesh_file"]
-
 ECS_TAG   = params["ECS_TAG"]
-if ECS_TAG is None:
-    ECS_TAG = 0      # set default extracell tag to 0 if it has not been set
-
 dt        = params["dt"]
 
 # get expression of initial mmebrane potential
@@ -131,14 +127,16 @@ for i in TAGS:
 # init vij using initial membrane potential        
 for i in TAGS:    
 
-        # interpolate v_init in intra_extra, intra_intra is 0 by default
+    # interpolate v_init in intra_extra, intra_intra is 0 by default
     if i < ECS_TAG:    
         vij_dict[(i,ECS_TAG)].interpolate(v_init)    
-        v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:] 
+        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:] 
 
     elif i > ECS_TAG:
         vij_dict[(ECS_TAG,i)].interpolate(v_init)    
-        v.x.array[:] += vij_dict[(ECS_TAG,i)].x.array[:] 
+    
+# save membrane potential for visualization (valid only for extra-intra)
+v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:] 
 
 ##### Restrictions #####
 restriction = []
@@ -380,13 +378,14 @@ for time_step in range(params["time_steps"]):
         for j in TAGS:
             if i < j:                
                 vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
-
-    # reset v
-    with v.vector.localForm() as v_local:
-        v_local.set(0)
+    
+    # fill v for visualization
+    v.x.array[:] = uh_dict[ECS_TAG].x.array
 
     for i in TAGS:
-        v.x.array[:] += uh_dict[i].x.array[:]     
+        if i != ECS_TAG:
+            v.x.array[:] -= uh_dict[i].x.array
+
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
