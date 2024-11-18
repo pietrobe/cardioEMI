@@ -54,7 +54,8 @@ python3 create_square_mesh.py
 in *create_square_mesh.py* geometric settings (#elements and #cells) can be modified.
 
 ###  Visualize output in Paraview
-In Paraview *Load State* of *output/bulk_state.pvsm* to visualise the bulk potential evolution.
+In Paraview *File > Load State...* of *output/bulk_state.pvsm*, selecting the correct path in *Load State Options*, to visualise the bulk potential evolution.
+
 TODO: membrane potential visualization
 
 ### Contributors
