@@ -138,10 +138,10 @@ def read_input_file(input_yml_file):
             input_parameters['P'] = 1
         
         # initial membrane potential (dafult 1)
-        if 'phi_M_init' in config: 
-            input_parameters['phi_M_init'] = config['phi_M_init']
+        if 'v_init' in config: 
+            input_parameters['v_init'] = config['v_init']
         else:
-            raise KeyError(f"Set phi_M_init in input file!")
+            raise KeyError(f"Set v_init in input file!")
             
 
         # ionic model 

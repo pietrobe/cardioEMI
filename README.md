@@ -54,12 +54,8 @@ python3 create_square_mesh.py
 in *create_square_mesh.py* geometric settings (#elements and #cells) can be modified.
 
 ###  Visualize output in Paraview
-Given an output file *solX.xdmf* and an tags mesh file *tags.xdmf*, apply the following filters:
-+ `Extract blocks` to *tags.xdmf* of cell_tag data, followed by `Merge blocks`
-+ `Append Attributes` of both *solX.xdmf* and the MergeBlock (order can be important)
-+ `Threshold` to the appended attribute according to cell tag and field of interest
-
-Similarly can be done for the membrane output file *v.xdmf* and facet tags.
+In Paraview *Load State* of *output/bulk_state.pvsm* to visualise the bulk potential evolution.
+TODO: membrane potential visualization
 
 ### Contributors
 

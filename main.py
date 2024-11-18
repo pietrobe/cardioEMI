@@ -42,7 +42,7 @@ if ECS_TAG is None:
 dt        = params["dt"]
 
 # get expression of initial mmebrane potential
-v_init = Read_input_field(params['phi_M_init'])
+v_init = Read_input_field(params['v_init'])
 
 # Timers
 solve_time    = 0
@@ -108,8 +108,9 @@ uh_dict  = dict()
 vij_dict = dict()
 fg_dict  = dict()
 
-# to store all solutions
+# to store membrane potential
 v = dfx.fem.Function(V)
+v.name = "v"
 
 for i in TAGS:
 
@@ -281,8 +282,7 @@ if params["save_output"]:
     # potentials xdmf
     out_sol = dfx.io.XDMFFile(comm, "output/solution.xdmf", "w")
     out_sol.write_mesh(mesh)            
-    # out_sol.write_meshtags(subdomains, mesh.geometry) # TODO remove??
-    
+        
     # memebrane potential xdmf
     out_v = dfx.io.XDMFFile(comm, "output/v.xdmf" , "w")
     out_v.write_mesh(mesh)

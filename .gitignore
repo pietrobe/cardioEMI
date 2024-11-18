@@ -1,5 +1,6 @@
-# Outptut folders
-output
+# Outptut data
+output/*.h5
+output/*.xdmf
 
 # input file for tests
 input_test.yml
