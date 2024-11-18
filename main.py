@@ -269,26 +269,27 @@ t = 0.0
 
 # Create output files
 if params["save_output"]:
-    
-    out_list = []
 
+    # rename solutions
     for i in TAGS:        
-
-        output_filename = "output/sol_" + str(i) + ".xdmf"
-        out_i = dfx.io.XDMFFile(mesh.comm, output_filename, "w")
-        out_i.write_mesh(mesh)        
-        out_list.append(out_i)
+        uh_dict[i].name  = "u_" + str(i)
     
-    out_v = dfx.io.XDMFFile(mesh.comm, "output/v.xdmf" , "w")
+    # potentials xdmf
+    out_sol = dfx.io.XDMFFile(comm, "output/solution.xdmf", "w")
+    out_sol.write_mesh(mesh)            
+    # out_sol.write_meshtags(subdomains, mesh.geometry) # TODO remove??
+    
+    # memebrane potential xdmf
+    out_v = dfx.io.XDMFFile(comm, "output/v.xdmf" , "w")
     out_v.write_mesh(mesh)
     out_v.write_function(v, t)
 
     # save subdomain data, needed for parallel visualizaiton
-    with dfx.io.XDMFFile(comm, "output/tags.xdmf", "w") as xdmf:                
-        xdmf.write_mesh(mesh)            
-        xdmf.write_meshtags(subdomains, mesh.geometry)
-        xdmf.write_meshtags(boundaries, mesh.geometry)        
-        xdmf.close()
+    with dfx.io.XDMFFile(comm, "output/tags.xdmf", "w") as out_tags:                
+        out_tags.write_mesh(mesh)            
+        out_tags.write_meshtags(subdomains, mesh.geometry)
+        out_tags.write_meshtags(boundaries, mesh.geometry)        
+        out_tags.close()
 
 #---------------------------------#
 #        SOLUTION TIMELOOP        #
@@ -385,9 +386,10 @@ for time_step in range(params["time_steps"]):
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
+    # save xdmf output
     if params["save_output"] and time_step % params["save_interval"] == 0:               
         for i in TAGS:
-            out_list[i].write_function(uh_dict[i], t)          
+            out_sol.write_function(uh_dict[i], t)        
 
         out_v.write_function(v, t)
 
@@ -426,8 +428,6 @@ if comm.rank == 0:
 # Write solutions to file
 if params["save_output"]:    
     if comm.rank == 0: print("\nSolution saved in output")
-    
-    for i in TAGS:
-        out_list[i].close()
 
+    out_sol.close()
     out_v.close()
