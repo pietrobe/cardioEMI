@@ -13,9 +13,10 @@ import pickle
 N_TAGS = 4 
 
 # user input
-elements_per_side = 64 
-cells_per_side    = 1
+elements_per_side = 256 
+cells_per_side    = 32
 out_file = "../data/square_mesh_" + str(elements_per_side) + "_" + str(cells_per_side) + ".xdmf"
+out_dict = "../data/square_dict_" + str(elements_per_side) + "_" + str(cells_per_side) + ".pickle"
 
 t1 = time.perf_counter()
 
@@ -181,7 +182,7 @@ def create_square(N: int, cells_per_side: int, out_file: str) -> dict:
             mesh_file.write_meshtags(subdomains, mesh.geometry)
 
     # Save to a file
-    with open("../data/membrane_tags_dict.pickle", "wb") as f:
+    with open(out_dict, "wb") as f:
         pickle.dump(membrane_tags_dict, f)   
 
     return membrane_tags_dict
