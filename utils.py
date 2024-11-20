@@ -21,7 +21,7 @@ class Read_input_field:
             return self.expression + 0 * x[0] # hack
         # If expression is a string, evaluate it
         elif isinstance(self.expression, str):
-            return eval(self.expression, {"np": np, "x": x})
+            return eval(self.expression, {"np": np, "ufl": ufl, "x": x})
         else:
             raise ValueError("Expression must be a string, int, or float.")                     
 
