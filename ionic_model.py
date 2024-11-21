@@ -1,21 +1,23 @@
 from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
+from utils import *
 import dolfinx  as dfx
 import numpy as np
 
 class Ionic_model(ABC):
 
     # constructor
-    def __init__(self, params):
+    def __init__(self, params, V=None):
         self.params = params                     
-            
+        self.V      = V
+
     @abstractmethod
     def _eval(self, v):
         # Abstract method that must be implemented by concrete subclasses.
         pass
 
 # Factory function
-def ionic_model_factory(params, intra_intra=False):
+def ionic_model_factory(params, intra_intra=False, V=None):
     
     # Dictionary mapping strings to classes
     available_models = {
@@ -35,7 +37,9 @@ def ionic_model_factory(params, intra_intra=False):
         model_name = model_name.lower()
 
         # Return an instance of the specified model
-        if model_name in available_models:        
+        if (model_name in available_models) and (V is not None):        
+            return available_models[model_name](params, V)
+        elif (model_name in available_models) and (V is None):
             return available_models[model_name](params)
         else:
             print("Available models: ", available_models)
@@ -46,7 +50,9 @@ def ionic_model_factory(params, intra_intra=False):
         if intra_intra:
             model_name = model_name["intra_intra"].lower()
 
-            if model_name in available_models:        
+            if model_name=="passive" or model_name=="ohmic":  
+                return available_models[model_name](params,V)
+            elif model_name in available_models:        
                 return available_models[model_name](params)
             else:
                 print("Available models: ", available_models)
@@ -66,12 +72,19 @@ def ionic_model_factory(params, intra_intra=False):
 
 # I_ch = v / R_g
 class Passive_model(Ionic_model):
-    
+    def __init__(self, params, V):
+        super().__init__(params, V=V)
+        R_g = Read_input_field(self.params["R_g"])
+        self.R_g = dfx.fem.Function(V)
+        self.R_g.interpolate(R_g)
+        self.R_g = self.R_g.x.array
+        self.R_g = np.reciprocal(self.R_g)
+        
     def __str__(self):
         return f'Passive'
         
-    def _eval(self, v):                 
-        return (1.0/self.params["R_g"]) * v
+    def _eval(self, v):              
+        return self.R_g * v
 
 
 # Hodgkin–Huxley

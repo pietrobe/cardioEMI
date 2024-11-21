@@ -172,7 +172,7 @@ for i in TAGS:
             if i == ECS_TAG or j == ECS_TAG:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
-                ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True)
+                ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True, V=V)
         
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
