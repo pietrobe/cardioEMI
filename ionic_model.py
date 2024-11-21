@@ -97,9 +97,6 @@ class HH_model(Ionic_model):
     # numerics
     use_Rush_Lar   = True
     time_steps_ODE = 25
-
-    # save gating in PNG    
-    save_png_file = False
     
     initial_time_step = True 
     
@@ -117,10 +114,7 @@ class HH_model(Ionic_model):
             self.n = 0 * v + self.n_init
             self.m = 0 * v + self.m_init
             self.h = 0 * v + self.h_init            
-
-            # output
-            if self.save_png_file: self.init_png()
-
+            
             self.initial_time_step = False            
 
         else:            
@@ -197,17 +191,58 @@ class HH_model(Ionic_model):
 # Aliev-Panfilov
 class AP_model(Ionic_model):
     
+    # Aliev-Panfilov parameters
+    mu1 = 0.2 # OC
+    mu2 = 0.3 # OC
+    k   = 8.0  # OC
+    a   = 0.15 # OC
+    epsilon = 0.002 # OC
+    w_init  = 0.0   # inital state 
+
+    # quantities in Volt for conversion v[V] = 0.1*v - 0.08
+    V_min = -0.08
+    V_max =  0.02
+    conversion_factor = 1.0/(V_max - V_min)    
+
+    # time quantities
+    time_steps_ODE  = 1
+    dt_ode          = 0.03
+    # time_conversion = 0.0129 # t[s] = 0.0129t [t.u.]
+    # time_conversion = 12.9 # t[ms] = 0.0129t [t.u.]
+    
+    
+    initial_time_step = True    
+
     def __str__(self):
-        return f'Aliev-Panfilov'
+        return "Aliev-Panfilov Model"
+
+    def _eval(self, v):
+
+        # conversion from V to adimensional
+        v = self.conversion_factor * (v - self.V_min) 
+
+        # update gating variable w
+        if self.initial_time_step:            
+
+            # init quantities
+            self.w = 0 * v + self.w_init               
+
+            # self.dt_ode = float(self.params['dt']) / (self.time_steps_ODE * self.time_conversion)            
+            
+            self.initial_time_step = False    
+            
+        else:
+            self.update_gating_variables(v)        
         
-    def _eval(self, v):                 
-
-        # TODO
-        I_ion = v
-
+        I_ion = self.k*v*(v - self.a)*(v - 1) + v*self.w
+        
         return I_ion
 
-
+    def update_gating_variables(self, v):          
+        
+        for i in range(self.time_steps_ODE):
+            diff_w = (self.epsilon + self.mu1 * self.w/(v + self.mu2)) * (- self.w - self.k*v*(v - self.a - 1.0))
+            self.w += diff_w * self.dt_ode 
 
 
 
