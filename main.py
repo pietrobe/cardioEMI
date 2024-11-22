@@ -33,8 +33,11 @@ start_time = time.perf_counter()
 # MPI communicator
 comm = MPI.COMM_WORLD 
 
+if comm.rank == 0: 
+    print("\n#-----------SETUP----------#")
+    print("Processing input file:", argv[1])      
+
 # Read input file 
-if comm.rank == 0: print("Processing input file:", argv[1])      
 params = read_input_file(argv[1])
 
 # aliases
@@ -76,7 +79,7 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
 mesh.geometry.x[:] *= params["mesh_conversion_factor"]
 
 # timers
-if comm.rank == 0: print(f"Reading input time: {time.perf_counter() - start_time:.2f}")
+if comm.rank == 0: print(f"Reading input time:     {time.perf_counter() - start_time:.2f} seconds")
 t1 = time.perf_counter()
 
 # Define integral measures
@@ -158,7 +161,7 @@ for i in TAGS:
     restriction.append(restriction_Vi_Omega_i)
 
 # timers
-if comm.rank == 0: print(f"Creating FEM spaces and restrictions: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter()
 setup_time = t1 - start_time
 
@@ -221,7 +224,7 @@ for i in TAGS:
 a = dfx.fem.form(a, jit_options=jit_parameters)
 
 # timers
-if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter() 
 
 #---------------------------#
@@ -233,7 +236,7 @@ A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, r
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
-if comm.rank == 0: print(f"Assembling matrix A: {time.perf_counter() - t1:.2f}\n")
+if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
 
 # Save A
 # dump(A, 'output/Amat')
@@ -297,6 +300,8 @@ if params["save_output"]:
 # init auxiliary data structures
 ksp_iterations = []
 I_ion = dict()
+
+if comm.rank == 0: print("\n#-----------SOLVE----------#")    
 
 for time_step in range(params["time_steps"]):
 
@@ -430,7 +435,7 @@ total_time = max_local_assemble_time + max_local_solve_time + max_local_ODE_time
 
 # Print stuff
 if comm.rank == 0: 
-    print("\n\n#-----------INFO-----------#\n")
+    print("\n\n#-----------INFO-----------#")
     print("MPI size     =", comm.size)        
     print("N_TAGS       =", N_TAGS   )
     print("dt           =", dt       )
@@ -449,7 +454,7 @@ if comm.rank == 0:
         print("Ionic model:", params['ionic_model'])        
 
 
-    print("\n#-------TIME ELAPSED-------#\n")
+    print("\n#-------TIME ELAPSED-------#")
     print(f"Setup time:       {max_local_setup_time:.3f} seconds")
     print(f"Assembly time:    {max_local_assemble_time:.3f} seconds")
     print(f"Solve time:       {max_local_solve_time:.3f} seconds")

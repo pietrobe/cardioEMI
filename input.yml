@@ -19,7 +19,7 @@ v_init: "-0.08 * (x[0] > 0.15)"
 
 # Ionic model
 ionic_model: 
-  intra_intra: "Null"
+  intra_intra: "Passive"
   intra_extra: "AP"
 
 # Solver 
