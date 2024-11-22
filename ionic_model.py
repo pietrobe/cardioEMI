@@ -82,7 +82,7 @@ class Null_model(Ionic_model):
 
 # I_ch = v / R_g
 class Passive_model(Ionic_model):
-    def __init__(self, params, V):
+    def __init__(self, params, V):        
         super().__init__(params, V=V)
         R_g = Read_input_field(self.params["R_g"])
         self.R_g = dfx.fem.Function(V)
@@ -127,7 +127,6 @@ class HH_model(Ionic_model):
     def __str__(self):
         return f'Hodgkin–Huxley'
     
-
     def _eval(self, v):   
         
         # update gating variables
@@ -141,10 +140,7 @@ class HH_model(Ionic_model):
             self.initial_time_step = False            
 
         else:            
-            self.update_gating_variables(v)  
-
-            # output
-            if self.save_png_file: self.save_png()                          
+            self.update_gating_variables(v)              
 
         # conductivities
         g_Na = self.g_Na_leak + self.g_Na_bar*self.m**3*self.h
