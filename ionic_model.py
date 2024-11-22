@@ -21,6 +21,7 @@ def ionic_model_factory(params, intra_intra=False, V=None):
     
     # Dictionary mapping strings to classes
     available_models = {
+        "null"   : Null_model,
         "passive": Passive_model,
         "ohmic"  : Passive_model,
         "hodgkin–huxley": HH_model,
@@ -68,6 +69,15 @@ def ionic_model_factory(params, intra_intra=False, V=None):
                 raise ValueError(f"Unknown model name: {model_name}")
     else:
         raise ValueError(f"Unknown ionic model type")
+
+
+# I_ch = 0
+class Null_model(Ionic_model):    
+    def __str__(self):
+        return f'Null'
+        
+    def _eval(self, v):              
+        return 0 * v
 
 
 # I_ch = v / R_g
@@ -217,12 +227,10 @@ class AP_model(Ionic_model):
     V_max =  0.02
     conversion_factor = 1.0/(V_max - V_min)    
 
-    # time quantities
-    time_steps_ODE  = 1
-    dt_ode          = 0.03
-    # time_conversion = 0.0129 # t[s] = 0.0129t [t.u.]
-    # time_conversion = 12.9 # t[ms] = 0.0129t [t.u.]
-    
+    # for one time step with u0 = 0 and at t = dt, c = 0.0129 (# t[s] = 0.0129t [t.u.])
+    #  u = dt * I_ion [tu] = c * dt * (C * I_ion) [s] -> C = 1/c
+
+    time_conversion = 1.0/0.0129 
     
     initial_time_step = True    
 
@@ -238,9 +246,8 @@ class AP_model(Ionic_model):
         if self.initial_time_step:            
 
             # init quantities
-            self.w = 0 * v + self.w_init               
-
-            # self.dt_ode = float(self.params['dt']) / (self.time_steps_ODE * self.time_conversion)            
+            self.w = 0 * v + self.w_init                           
+            self.dt_ode = self.time_conversion * float(self.params['dt'])             
             
             self.initial_time_step = False    
             
@@ -249,13 +256,12 @@ class AP_model(Ionic_model):
         
         I_ion = self.k*v*(v - self.a)*(v - 1) + v*self.w
         
-        return I_ion
+        return self.time_conversion * I_ion
 
     def update_gating_variables(self, v):          
-        
-        for i in range(self.time_steps_ODE):
-            diff_w = (self.epsilon + self.mu1 * self.w/(v + self.mu2)) * (- self.w - self.k*v*(v - self.a - 1.0))
-            self.w += diff_w * self.dt_ode 
+                
+        diff_w = (self.epsilon + self.mu1 * self.w/(v + self.mu2)) * (- self.w - self.k*v*(v - self.a - 1.0))        
+        self.w += diff_w * self.dt_ode 
 
 
 

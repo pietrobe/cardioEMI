@@ -5,8 +5,8 @@ mesh_conversion_factor: 1
 fem_order: 1
 
 # Temporal parameters 
-dt         : 0.01
-time_steps : 1000
+dt         : 0.00015
+time_steps : 3000
 
 # Physical parameters 
 C_M       : 1
@@ -14,12 +14,12 @@ sigma_i   : 1 #"ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
 sigma_e   : 1
 R_g       : 1
 
-# initial membrane potential
+# Initial membrane potential
 v_init: "-0.08 * (x[0] > 0.15)"
 
 # Ionic model
 ionic_model: 
-  intra_intra: "Passive"
+  intra_intra: "Null"
   intra_extra: "AP"
 
 # Solver 
@@ -29,5 +29,5 @@ ksp_rtol: 1e-7
 
 # Output 
 save_output  : True
-save_interval: 20
+save_interval: 30
 verbose      : False
