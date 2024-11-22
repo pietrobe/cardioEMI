@@ -5,7 +5,7 @@ import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
 import dolfinx  as dfx
 from ufl      import inner, grad
-from sys      import argv
+from sys      import argv, stdout
 from mpi4py   import MPI
 from pathlib  import Path
 from petsc4py import PETSc
@@ -242,7 +242,7 @@ A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, r
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
-if comm.rank == 0: print(f"Assembling matrix A: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Assembling matrix A: {time.perf_counter() - t1:.2f}\n")
 
 # Save A
 # dump(A, 'output/Amat')
@@ -309,7 +309,7 @@ I_ion = dict()
 
 for time_step in range(params["time_steps"]):
 
-    if comm.rank == 0: print("time_step =", time_step )
+    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')        
 
     # init data structure for linear form
     L_list = []
@@ -420,15 +420,16 @@ total_time = max_local_assemble_time + max_local_solve_time + max_local_ODE_time
 
 # Print stuff
 if comm.rank == 0: 
-    print("\n#-----------INFO-----------#\n")
-    print("MPI size =", comm.size)        
-    print("N_TAGS ="  , N_TAGS   )
-    print("dt ="      , dt       )
-    print("P ="       , params["P"])
-    print("ksp_type =", params["ksp_type"])
-    print("pc_type =" , params["pc_type"] )
-    print("Average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
+    print("\n\n#-----------INFO-----------#\n")
+    print("MPI size     =", comm.size)        
+    print("N_TAGS       =", N_TAGS   )
+    print("dt           =", dt       )
+    print("time steps   =", params["time_steps"])
+    print("P            =", params["P"])
+    print("ksp_type     =", params["ksp_type"])
+    print("pc_type      =", params["pc_type"] )
     print("Global #DoFs =", b.getSize())
+    print("Average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
     
     if isinstance(params["ionic_model"], dict):
         print("Ionic models:")
