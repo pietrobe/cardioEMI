@@ -178,14 +178,6 @@ for i in TAGS:
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
 
-# # BCs (use bcs=[bc_point] in block_assembly)
-# if comm.rank == 0:
-#     zero     = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))
-#     bc_dofs  = dfx.fem.locate_dofs_topological(V_dict[ECS_TAG], boundaries.dim, [ECS_TAG])
-#     bc_point = dfx.fem.dirichletbc(zero, bc_dofs, V_dict[ECS_TAG]) 
-# else:
-#     bc_point = None
-
 # bilinear form
 a = []
 
@@ -237,7 +229,6 @@ t1 = time.perf_counter()
 #---------------------------#
 
 # Assemble the block linear system matrix
-# A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction), bcs=[bc_point])
 A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
@@ -309,7 +300,7 @@ I_ion = dict()
 
 for time_step in range(params["time_steps"]):
 
-    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')        
+    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}% ')        
 
     # init data structure for linear form
     L_list = []
@@ -358,14 +349,33 @@ for time_step in range(params["time_steps"]):
 
     L = dfx.fem.form(L_list, jit_options=jit_parameters) # Convert form to dolfinx form
 
-    # b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, restriction=restriction, bcs=[bc_point]) # Assemble RHS vector
     b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, restriction=restriction) # Assemble RHS vector
     
     # dump(b, 'output/bvec')
         
     if time_step == 0:
+        
         # Create solution vector
         sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+
+        # Create nullspace to enforce pure Neumann boundary conditions
+        ns_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+        ns_vec.array[:] = 1
+        ns_vec.normalize()
+
+        # Create the PETSc nullspace vector and check that it is a valid nullspace of A
+        nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=comm)
+        assert nullspace.test(A) 
+        
+        # Set the nullspace
+        if params["ksp_type"] == "cg":
+            A.setNullSpace(nullspace)
+            A.setNearNullSpace(nullspace)
+            nullspace.remove(b)
+        else: # direct solver
+            A.setNullSpace(nullspace)        
+            nullspace.remove(b)
+    
 
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
     
