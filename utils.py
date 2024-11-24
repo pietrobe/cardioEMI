@@ -4,6 +4,7 @@ from petsc4py import PETSc
 import scipy.sparse as sparse
 import numpy        as np
 import numpy.typing as npt
+import sys
 import ufl
 import os
 import yaml
@@ -190,6 +191,11 @@ def read_input_file(input_yml_file):
                 
         return input_parameters
         
+
+def update_status(message):
+    sys.stdout.write(f'\r{message}')
+    sys.stdout.flush()
+
 
 def check_if_file_exists(file_path):
     if not os.path.exists(file_path):        

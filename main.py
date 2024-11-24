@@ -5,7 +5,7 @@ import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
 import dolfinx  as dfx
 from ufl      import inner, grad
-from sys      import argv
+from sys      import argv, stdout
 from mpi4py   import MPI
 from pathlib  import Path
 from petsc4py import PETSc
@@ -23,13 +23,21 @@ jit_parameters  = {"cffi_extra_compile_args"  : compile_options,
 #     PARAMETERS AND SOLVER SETTINGS     #
 #----------------------------------------#
 
+# Timers
+solve_time    = 0
+assemble_time = 0
+ODEs_time     = 0
+
 start_time = time.perf_counter()
 
 # MPI communicator
 comm = MPI.COMM_WORLD 
 
+if comm.rank == 0: 
+    print("\n#-----------SETUP----------#")
+    print("Processing input file:", argv[1])      
+
 # Read input file 
-if comm.rank == 0: print("Processing input file:", argv[1])      
 params = read_input_file(argv[1])
 
 # aliases
@@ -39,10 +47,6 @@ dt        = params["dt"]
 
 # get expression of initial mmebrane potential
 v_init = Read_input_field(params['v_init'])
-
-# Timers
-solve_time    = 0
-assemble_time = 0
 
 #-----------------------#
 #          MESH         #
@@ -75,7 +79,7 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
 mesh.geometry.x[:] *= params["mesh_conversion_factor"]
 
 # timers
-if comm.rank == 0: print(f"Reading input time: {time.perf_counter() - start_time:.2f}")
+if comm.rank == 0: print(f"Reading input time:     {time.perf_counter() - start_time:.2f} seconds")
 t1 = time.perf_counter()
 
 # Define integral measures
@@ -157,8 +161,9 @@ for i in TAGS:
     restriction.append(restriction_Vi_Omega_i)
 
 # timers
-if comm.rank == 0: print(f"Creating FEM spaces and restrictions: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter()
+setup_time = t1 - start_time
 
 # set ionic models
 ionic_models = dict()
@@ -175,11 +180,6 @@ for i in TAGS:
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
-
-# BCs (use bcs=[bc_point] in block_assembly)
-zero     = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))
-bc_dofs  = dfx.fem.locate_dofs_topological(V_dict[ECS_TAG], boundaries.dim, [ECS_TAG])
-bc_point = dfx.fem.dirichletbc(zero, bc_dofs, V_dict[ECS_TAG]) 
 
 # bilinear form
 a = []
@@ -224,7 +224,7 @@ for i in TAGS:
 a = dfx.fem.form(a, jit_options=jit_parameters)
 
 # timers
-if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter() 
 
 #---------------------------#
@@ -232,11 +232,11 @@ t1 = time.perf_counter()
 #---------------------------#
 
 # Assemble the block linear system matrix
-A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction), bcs=[bc_point])
+A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
-if comm.rank == 0: print(f"Assembling matrix A: {time.perf_counter() - t1:.2f}")
+if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
 
 # Save A
 # dump(A, 'output/Amat')
@@ -301,9 +301,11 @@ if params["save_output"]:
 ksp_iterations = []
 I_ion = dict()
 
+if comm.rank == 0: print("\n#-----------SOLVE----------#")    
+
 for time_step in range(params["time_steps"]):
 
-    if comm.rank == 0: print("time_step =", time_step )
+    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}% ')        
 
     # init data structure for linear form
     L_list = []
@@ -332,7 +334,12 @@ for time_step in range(params["time_steps"]):
                     ij_tuple = (i,j)                                        
                     L_coeff  = 1
                     with vij_dict[ij_tuple].vector.localForm() as v_local:
-                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])                                            
+
+                        t_ODE = time.perf_counter()
+                        
+                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])             
+
+                        ODEs_time += time.perf_counter() - t_ODE 
                 else:
                     ij_tuple = (j,i)
                     L_coeff  = -1                    
@@ -347,13 +354,33 @@ for time_step in range(params["time_steps"]):
 
     L = dfx.fem.form(L_list, jit_options=jit_parameters) # Convert form to dolfinx form
 
-    b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, restriction=restriction, bcs=[bc_point]) # Assemble RHS vector
+    b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, restriction=restriction) # Assemble RHS vector
     
     # dump(b, 'output/bvec')
         
     if time_step == 0:
+        
         # Create solution vector
         sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+
+        # Create nullspace to enforce pure Neumann boundary conditions
+        ns_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+        ns_vec.array[:] = 1
+        ns_vec.normalize()
+
+        # Create the PETSc nullspace vector and check that it is a valid nullspace of A
+        nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=comm)
+        assert nullspace.test(A) 
+        
+        # Set the nullspace
+        if params["ksp_type"] == "cg":
+            A.setNullSpace(nullspace)
+            A.setNearNullSpace(nullspace)
+            nullspace.remove(b)
+        else: # direct solver
+            A.setNullSpace(nullspace)        
+            nullspace.remove(b)
+    
 
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
     
@@ -402,18 +429,22 @@ for time_step in range(params["time_steps"]):
 # Sum local assembly and solve times to get global values
 max_local_assemble_time = comm.allreduce(assemble_time, op=MPI.MAX) # Global assembly time
 max_local_solve_time    = comm.allreduce(solve_time   , op=MPI.MAX) # Global solve time
+max_local_ODE_time      = comm.allreduce(ODEs_time    , op=MPI.MAX) # Global ODEs time
+max_local_setup_time    = comm.allreduce(setup_time   , op=MPI.MAX) # Global setup time
+total_time = max_local_assemble_time + max_local_solve_time + max_local_ODE_time + max_local_setup_time
 
 # Print stuff
 if comm.rank == 0: 
-    print("\n#-----------INFO-----------#\n")
-    print("MPI size =", comm.size)        
-    print("N_TAGS ="  , N_TAGS   )
-    print("dt ="      , dt       )
-    print("P ="       , params["P"])
-    print("ksp_type =", params["ksp_type"])
-    print("pc_type =" , params["pc_type"] )
-    print("Average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
+    print("\n\n#-----------INFO-----------#")
+    print("MPI size     =", comm.size)        
+    print("N_TAGS       =", N_TAGS   )
+    print("dt           =", dt       )
+    print("time steps   =", params["time_steps"])
+    print("P            =", params["P"])
+    print("ksp_type     =", params["ksp_type"])
+    print("pc_type      =", params["pc_type"] )
     print("Global #DoFs =", b.getSize())
+    print("Average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
     
     if isinstance(params["ionic_model"], dict):
         print("Ionic models:")
@@ -423,14 +454,19 @@ if comm.rank == 0:
         print("Ionic model:", params['ionic_model'])        
 
 
-    print("\n#-------TIME ELAPSED-------#\n")
-    print(f"Assembly time:      {max_local_assemble_time:.3f} seconds")
-    print(f"Solve time:         {max_local_solve_time:.3f}    seconds")
-    print(f"Total time elapsed: {time.perf_counter() - start_time:.3f} seconds")
+    print("\n#-------TIME ELAPSED-------#")
+    print(f"Setup time:       {max_local_setup_time:.3f} seconds")
+    print(f"Assembly time:    {max_local_assemble_time:.3f} seconds")
+    print(f"Solve time:       {max_local_solve_time:.3f} seconds")
+    print(f"Ionic model time: {max_local_ODE_time:.3f} seconds")
+    print(f"Total time:       {total_time:.3f} seconds")    
 
 # Write solutions to file
 if params["save_output"]:    
-    if comm.rank == 0: print("\nSolution saved in output")
 
     out_sol.close()
     out_v.close()
+
+    if comm.rank == 0: 
+        print("\nSolution saved in output folder")    
+        print(f"Total script time (with output): {time.perf_counter() - start_time:.3f} seconds\n")

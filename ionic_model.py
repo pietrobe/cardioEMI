@@ -21,6 +21,7 @@ def ionic_model_factory(params, intra_intra=False, V=None):
     
     # Dictionary mapping strings to classes
     available_models = {
+        "null"   : Null_model,
         "passive": Passive_model,
         "ohmic"  : Passive_model,
         "hodgkin–huxley": HH_model,
@@ -70,9 +71,18 @@ def ionic_model_factory(params, intra_intra=False, V=None):
         raise ValueError(f"Unknown ionic model type")
 
 
+# I_ch = 0
+class Null_model(Ionic_model):    
+    def __str__(self):
+        return f'Null'
+        
+    def _eval(self, v):              
+        return 0 * v
+
+
 # I_ch = v / R_g
 class Passive_model(Ionic_model):
-    def __init__(self, params, V):
+    def __init__(self, params, V):        
         super().__init__(params, V=V)
         R_g = Read_input_field(self.params["R_g"])
         self.R_g = dfx.fem.Function(V)
@@ -110,9 +120,6 @@ class HH_model(Ionic_model):
     # numerics
     use_Rush_Lar   = True
     time_steps_ODE = 25
-
-    # save gating in PNG    
-    save_png_file = False
     
     initial_time_step = True 
     
@@ -120,7 +127,6 @@ class HH_model(Ionic_model):
     def __str__(self):
         return f'Hodgkin–Huxley'
     
-
     def _eval(self, v):   
         
         # update gating variables
@@ -130,17 +136,11 @@ class HH_model(Ionic_model):
             self.n = 0 * v + self.n_init
             self.m = 0 * v + self.m_init
             self.h = 0 * v + self.h_init            
-
-            # output
-            if self.save_png_file: self.init_png()
-
+            
             self.initial_time_step = False            
 
         else:            
-            self.update_gating_variables(v)  
-
-            # output
-            if self.save_png_file: self.save_png()                          
+            self.update_gating_variables(v)              
 
         # conductivities
         g_Na = self.g_Na_leak + self.g_Na_bar*self.m**3*self.h
@@ -210,17 +210,54 @@ class HH_model(Ionic_model):
 # Aliev-Panfilov
 class AP_model(Ionic_model):
     
+    # Aliev-Panfilov parameters
+    mu1 = 0.2 # OC
+    mu2 = 0.3 # OC
+    k   = 8.0  # OC
+    a   = 0.15 # OC
+    epsilon = 0.002 # OC
+    w_init  = 0.0   # inital state 
+
+    # quantities in Volt for conversion v[V] = 0.1*v - 0.08
+    V_min = -0.08
+    V_max =  0.02
+    conversion_factor = 1.0/(V_max - V_min)    
+
+    # for one time step with u0 = 0 and at t = dt, c = 0.0129 (# t[s] = 0.0129t [t.u.])
+    #  u = dt * I_ion [tu] = c * dt * (C * I_ion) [s] -> C = 1/c
+
+    time_conversion = 1.0/0.0129 
+    
+    initial_time_step = True    
+
     def __str__(self):
-        return f'Aliev-Panfilov'
+        return "Aliev-Panfilov Model"
+
+    def _eval(self, v):
+
+        # conversion from V to adimensional
+        v = self.conversion_factor * (v - self.V_min) 
+
+        # update gating variable w
+        if self.initial_time_step:            
+
+            # init quantities
+            self.w = 0 * v + self.w_init                           
+            self.dt_ode = self.time_conversion * float(self.params['dt'])             
+            
+            self.initial_time_step = False    
+            
+        else:
+            self.update_gating_variables(v)        
         
-    def _eval(self, v):                 
+        I_ion = self.k*v*(v - self.a)*(v - 1) + v*self.w
+        
+        return self.time_conversion * I_ion
 
-        # TODO
-        I_ion = v
-
-        return I_ion
-
-
+    def update_gating_variables(self, v):          
+                
+        diff_w = (self.epsilon + self.mu1 * self.w/(v + self.mu2)) * (- self.w - self.k*v*(v - self.a - 1.0))        
+        self.w += diff_w * self.dt_ode 
 
 
 
