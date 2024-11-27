@@ -4,6 +4,7 @@ import pickle
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
 import dolfinx  as dfx
+import matplotlib.pyplot as plt
 from ufl      import inner, grad
 from sys      import argv, stdout
 from mpi4py   import MPI
@@ -227,12 +228,13 @@ a = dfx.fem.form(a, jit_options=jit_parameters)
 if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter() 
 
-#---------------------------#
-#      MATRIX ASSEMBLY      #
-#---------------------------#
+# #---------------------------#
+# #      MATRIX ASSEMBLY      #
+# #---------------------------#
 
 # Assemble the block linear system matrix
-A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
+A = multiphenicsx.fem.petsc.create_matrix_block(a,  restriction=(restriction, restriction))
+multiphenicsx.fem.petsc.assemble_matrix_block(A, a, restriction=(restriction, restriction))
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
@@ -242,8 +244,7 @@ if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f
 # dump(A, 'output/Amat')
 
 # Configure solver
-ksp = PETSc.KSP()
-ksp.create(comm)
+ksp = PETSc.KSP().create(comm)
 ksp.setOperators(A)
 
 # Set solver
@@ -311,7 +312,7 @@ for time_step in range(params["time_steps"]):
     L_list = []
 
     # Increment time
-    t += dt
+    t += float(dt)
 
     # Update and assemble vector that is the RHS of the linear system
     t1 = time.perf_counter() # Timestamp for assembly time-lapse      
@@ -352,17 +353,29 @@ for time_step in range(params["time_steps"]):
                                 
         L_list.append(L_i)
 
-    L = dfx.fem.form(L_list, jit_options=jit_parameters) # Convert form to dolfinx form
-
-    b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, restriction=restriction) # Assemble RHS vector
+    t_test = time.perf_counter()
     
+    # create some data structures
+    if time_step == 0: 
+
+        # Convert form to dolfinx form                    
+        L = dfx.fem.form(L_list, jit_options=jit_parameters) 
+
+        # Create right-hand side and solution vectors        
+        b       = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)                
+
+    
+    # Clear RHS vector to avoid accumulation and assemble RHS
+    b.array[:] = 0
+    b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+    multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, restriction=restriction) # Assemble RHS vector        
+        
     # dump(b, 'output/bvec')
         
+    # Neumann BC
     if time_step == 0:
-        
-        # Create solution vector
-        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
-
+                
         # Create nullspace to enforce pure Neumann boundary conditions
         ns_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
         ns_vec.array[:] = 1
@@ -387,7 +400,7 @@ for time_step in range(params["time_steps"]):
     # Solve the system
     t1 = time.perf_counter() # Timestamp for solver time-lapse
     ksp.solve(b, sol_vec)
-        
+
     # store iterisons 
     ksp_iterations.append(ksp.getIterationNumber())
 
@@ -423,6 +436,9 @@ for time_step in range(params["time_steps"]):
 
         out_v.write_function(v, t)
 
+
+if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}% ')        
+
 #------------------------------#
 #         POST PROCESS         #
 #------------------------------#
@@ -440,7 +456,8 @@ if comm.rank == 0:
     print("N_TAGS       =", N_TAGS   )
     print("dt           =", dt       )
     print("time steps   =", params["time_steps"])
-    print("P            =", params["P"])
+    print("T            =", dt * params["time_steps"])
+    print("P (FE order) =", params["P"])
     print("ksp_type     =", params["ksp_type"])
     print("pc_type      =", params["pc_type"] )
     print("Global #DoFs =", b.getSize())
@@ -460,8 +477,8 @@ if comm.rank == 0:
     print(f"Solve time:       {max_local_solve_time:.3f} seconds")
     print(f"Ionic model time: {max_local_ODE_time:.3f} seconds")
     print(f"Total time:       {total_time:.3f} seconds")    
+    
 
-# Write solutions to file
 if params["save_output"]:    
 
     out_sol.close()
