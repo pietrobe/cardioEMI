@@ -233,8 +233,7 @@ t1 = time.perf_counter()
 # #---------------------------#
 
 # Assemble the block linear system matrix
-A = multiphenicsx.fem.petsc.create_matrix_block(a,  restriction=(restriction, restriction))
-multiphenicsx.fem.petsc.assemble_matrix_block(A, a, restriction=(restriction, restriction))
+A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
@@ -306,7 +305,7 @@ if comm.rank == 0: print("\n#-----------SOLVE----------#")
 
 for time_step in range(params["time_steps"]):
 
-    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}% ')        
+    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')        
 
     # init data structure for linear form
     L_list = []
@@ -437,7 +436,7 @@ for time_step in range(params["time_steps"]):
         out_v.write_function(v, t)
 
 
-if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}% ')        
+if comm.rank == 0: update_status(f'Time stepping: 100%')        
 
 #------------------------------#
 #         POST PROCESS         #

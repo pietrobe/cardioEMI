@@ -1,5 +1,5 @@
 # Spatial parameters 
-mesh_file             : "data/square_mesh_64_1.xdmf"
+mesh_file             : "data/square_mesh_64_1_refined.xdmf"
 tags_dictionary_file  : "data/membrane_tags_dict.pickle"
 mesh_conversion_factor: 1 
 fem_order: 1
