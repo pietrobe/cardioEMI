@@ -5,6 +5,7 @@ from collections import defaultdict
 import sys
 import xml.etree.ElementTree as ET
 
+
 def update_xdmf_name(filename):
     # Parse the XML
     tree = ET.parse(filename)

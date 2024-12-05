@@ -256,6 +256,7 @@ class AP_model(Ionic_model):
         
         # convert from tu to ms and mV
         return (self.V_max - self.V_min) * self.time_factor * I_ion  + self.V_min
+        #return self.time_factor * ((self.V_max - self.V_min) * I_ion  + self.V_min)
 
     def update_gating_variables(self, v):          
                       
