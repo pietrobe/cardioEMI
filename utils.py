@@ -179,20 +179,20 @@ def read_input_file(input_yml_file):
         if 'save_output' in config: 
             input_parameters['save_output'] = config['save_output']
         else:
-            input_parameters['save_output'] = True
+            input_parameters['save_output'] = False
 
         if 'save_interval' in config: 
             input_parameters['save_interval'] = config['save_interval']
         else:
             input_parameters['save_interval'] = 1            
-
+        
         if 'verbose' in config: 
             input_parameters['verbose'] = config['verbose']
         else:
             input_parameters['verbose'] = False
                 
         return input_parameters
-        
+     
 
 def update_status(message):
     sys.stdout.write(f'\r{message}')
