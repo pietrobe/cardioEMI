@@ -211,23 +211,23 @@ class HH_model(Ionic_model):
 class AP_model(Ionic_model):
     
     # Aliev-Panfilov parameters
-    mu1 = 0.2 # OC
-    mu2 = 0.3 # OC
-    k   = 8.0  # OC
-    a   = 0.15 # OC
+    mu1 = 0.2       # OC
+    mu2 = 0.3       # OC
+    k   = 8.0       # OC
+    a   = 0.15      # OC
     epsilon = 0.002 # OC
     w_init  = 0.0   # inital state 
 
     # quantities in Volt for conversion v[V] = 0.1*v - 0.08
-    V_min = -0.08
-    V_max =  0.02
+    V_min = -0.08 #-80.0
+    V_max =  0.02 #20.0
     conversion_factor = 1.0/(V_max - V_min)    
 
     # for one time step with u0 = 0 and at t = dt, c = 0.0129 (# t[s] = 0.0129t [t.u.])
     #  u = dt * I_ion [tu] = c * dt * (C * I_ion) [s] -> C = 1/c
 
-    time_conversion = 1.0/0.0129 
-    
+    time_conversion = 1.0/0.0129 #1.0/12.9
+     
     initial_time_step = True    
 
     def __str__(self):
@@ -252,7 +252,7 @@ class AP_model(Ionic_model):
         
         I_ion = self.k*v*(v - self.a)*(v - 1) + v*self.w
         
-        return self.time_conversion * I_ion
+        return (self.V_max - self.V_min) * I_ion / self.time_conversion  + self.V_min
 
     def update_gating_variables(self, v):          
                 
