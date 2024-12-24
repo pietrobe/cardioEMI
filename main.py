@@ -239,9 +239,33 @@ assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly ti
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
 
 # Save A
-# dump(A, 'output/Amat')
+# dump(A, 'output/A_robin.mat')
+# Plot sparsity pattern 
+# plot_sparsity_pattern(A)
 
-# Configure solver
+#---------------------------------#
+#        CREATE NULLSPACE         #
+#---------------------------------#
+
+# Create the PETSc nullspace vector and check that it is a valid nullspace of A
+nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
+assert nullspace.test(A)
+# For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
+# sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
+# Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
+A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
+A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
+# Set the nullspace
+if params["ksp_type"] == "cg":
+    A.setNullSpace(nullspace)
+    A.setNearNullSpace(nullspace)
+else: # direct solver
+    A.setNullSpace(nullspace)
+
+#---------------------------------#
+#      CONFIGURE SOLVER           #
+#---------------------------------#
+
 ksp = PETSc.KSP()
 ksp.create(comm)
 ksp.setOperators(A)
@@ -361,27 +385,11 @@ for time_step in range(params["time_steps"]):
     if time_step == 0:
         
         # Create solution vector
-        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)        
 
-        # Create nullspace to enforce pure Neumann boundary conditions
-        ns_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
-        ns_vec.array[:] = 1
-        ns_vec.normalize()
-
-        # Create the PETSc nullspace vector and check that it is a valid nullspace of A
-        nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=comm)
-        assert nullspace.test(A) 
-        
-        # Set the nullspace
-        if params["ksp_type"] == "cg":
-            A.setNullSpace(nullspace)
-            A.setNearNullSpace(nullspace)
-            nullspace.remove(b)
-        else: # direct solver
-            A.setNullSpace(nullspace)        
-            nullspace.remove(b)
+    # if the timestep is not zero, b changes anyway and the nullspace must be removed
+    nullspace.remove(b)
     
-
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
     
     # Solve the system
