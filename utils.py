@@ -2,8 +2,10 @@ from mpi4py   import MPI
 from typing   import Union
 from petsc4py import PETSc
 import scipy.sparse as sparse
+import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
+import matplotlib.pyplot as plt
 import sys
 import ufl
 import os
@@ -208,13 +210,25 @@ def norm_2(vec):
 
 
 def dump(thing, path):
+    name = path.split("/")[-1]
     if isinstance(thing, PETSc.Vec):
         assert np.all(np.isfinite(thing.array))
         return np.save(path, thing.array)
     m = sparse.csr_matrix(thing.getValuesCSR()[::-1]).tocoo()
     assert np.all(np.isfinite(m.data))
-    return np.save(path, np.c_[m.row, m.col, m.data])
+    return np.save(path, np.c_[m.row, m.col, m.data]), sio.savemat(path, {name: m})
 
 
 def common_elements(set1, set2):    
     return set1.intersection(set2)
+
+def plot_sparsity_pattern(A):
+    ai, aj, av = A.getValuesCSR()
+    rows, cols = A.getSize()
+    sparse_matrix = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
+    plt.figure(figsize=(8, 8))
+    plt.spy(sparse_matrix, markersize=1)
+    plt.title("Sparsity Pattern of the Matrix")
+    plt.xlabel("Column Index")
+    plt.ylabel("Row Index")
+    plt.show()
