@@ -153,7 +153,8 @@ def facets(mesh):
                     next_tag += 1
                 facet_tag = zero_combination_map[(0, cell_value)]
             facet_values.append(facet_tag)
-            boundary_map[cell_value].add(facet_tag)  # Add to boundary map
+            if facet_tag!=0:
+                boundary_map[cell_value].add(facet_tag)  # Add to boundary map
         elif len(cells) == 2:  # Interior facet
             cell_value_1 = mesh['cell_values'][cells[0]]
             cell_value_2 = mesh['cell_values'][cells[1]]
@@ -174,8 +175,9 @@ def facets(mesh):
                 facet_tag = combination_map[(n, m)]
             facet_values.append(facet_tag)
             # Add to boundary map for both cell_value_1 and cell_value_2
-            boundary_map[cell_value_1].add(facet_tag)
-            boundary_map[cell_value_2].add(facet_tag)
+            if facet_tag!=0:
+                boundary_map[cell_value_1].add(facet_tag)
+                boundary_map[cell_value_2].add(facet_tag)
 
     # Step 4: Add to mesh
     mesh['facet_topology'] = np.array(facet_topology)
