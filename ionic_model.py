@@ -27,7 +27,8 @@ def ionic_model_factory(params, intra_intra=False, V=None):
         "hodgkin–huxley": HH_model,
         "hh"            : HH_model,
         "ap"            : AP_model,
-        "aliev-panfilov": AP_model
+        "aliev-panfilov": AP_model,
+        "ap2"           : AP_model_2
         # Add other models here as needed
     }
     
@@ -224,7 +225,7 @@ class AP_model(Ionic_model):
     conversion_factor = 1.0/(V_max - V_min)       
 
     # for one time step with u0 = 0 and at t = dt, t[s] = 0.0129t [t.u.] or t[ms] = 12.9t [t.u.]
-    #  u = dt * I_ion [tu] = 0.0129 * dt * (C * I_ion) [s] -> C = 1/0.0129
+    # u = dt * I_ion [tu] = 0.0129 * dt * (C * I_ion) [s] -> C = 1/0.0129
 
     # time_conversion = 1.0/0.0129
     time_factor     = 12.9
@@ -261,9 +262,52 @@ class AP_model(Ionic_model):
     def update_gating_variables(self, v):          
                       
         diff_w = (self.epsilon + self.mu1 * self.w/(v + self.mu2)) * (- self.w - self.k*v*(v - self.a - 1.0))        
-        self.w += diff_w * self.dt_ode 
+        self.w += diff_w * self.dt_ode
 
+# Aliev-Panfilov
+class AP_model_2(Ionic_model):
+    
+    # Aliev-Panfilov parameters
+    mu1 = 0.07
+    mu2 = 0.3
+    k   = 8.0
+    a   = 0.1
+    epsilon = 0.01
+    w_init  = 0.0   # inital state 
 
+    # quantities in Volt for conversion v[V] = 0.1*v - 0.08 or v[mV] = 100*v - 80
+    V_min = -85.0
+    V_max =  35.0
+        
+    initial_time_step = True    
+
+    def __str__(self):
+        return "Aliev-Panfilov Model 2"
+
+    def _eval(self, v):
+        
+        # init quantities
+        vv = (v - self.V_min) / (self.V_max - self.V_min)
+
+        if self.initial_time_step:            
+            self.w = 0 * vv + self.w_init                           
+            self.dt_ode = float(self.params['dt'])
+            
+            self.initial_time_step = False    
+        
+        I_ion = -(self.V_max - self.V_min)*self.k*(vv*(vv - self.a)*(vv - 1) + vv*self.w)
+
+        if not self.initial_time_step: 
+            #v = np.maximum(v,-90.0) # elementwise max min
+            #v = np.minimum(v,50.0)
+            vv = (v - self.V_min) / (self.V_max - self.V_min)
+            self.update_gating_variables(vv)
+
+        return I_ion
+
+    def update_gating_variables(self, v):          
+        diff_w = 0.25*(self.epsilon + self.mu1 * self.w/(v + self.mu2)) * (- self.w - self.k*v*(v - self.a - 1.0))        
+        self.w += diff_w * self.dt_ode
 
 #   def init_png(self):
 
