@@ -158,3 +158,4 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+dolfinx_v0.7.1.sif
