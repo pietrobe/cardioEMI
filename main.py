@@ -40,7 +40,7 @@ if comm.rank == 0:
 
 # Read input file 
 params = read_input_file(argv[1])
-print('hallo', params)
+
 # aliases
 mesh_file = params["mesh_file"]
 ECS_TAG   = params["ECS_TAG"]

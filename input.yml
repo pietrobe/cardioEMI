@@ -1,5 +1,5 @@
-mesh_file             : "data/robin-h11-15.xdmf"
-tags_dictionary_file  : "data/robin-h11-15.pickle"
+mesh_file             : "data/robin-h21-25.xdmf"
+tags_dictionary_file  : "data/robin-h21-25.pickle"
 mesh_conversion_factor: 0.0001 
 fem_order: 1
 
@@ -30,4 +30,4 @@ ksp_rtol: 1e-7
 save_output  : True
 save_interval: 1
 verbose      : False
-out_name     : "sigma_e_1" # this name is appended to v, solution and tags in the output file
+out_name     : "sigma_e_2"
