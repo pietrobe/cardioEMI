@@ -190,6 +190,11 @@ def read_input_file(input_yml_file):
             input_parameters['verbose'] = config['verbose']
         else:
             input_parameters['verbose'] = False
+
+        if 'out_name' in config:
+            input_parameters['out_name'] = config['out_name']
+        else:
+            raise SyntaxError(f'INPUT ERROR: provide name of output in input .yml file.')
                 
         return input_parameters
      

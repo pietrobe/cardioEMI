@@ -40,7 +40,7 @@ if comm.rank == 0:
 
 # Read input file 
 params = read_input_file(argv[1])
-
+print('hallo', params)
 # aliases
 mesh_file = params["mesh_file"]
 ECS_TAG   = params["ECS_TAG"]
@@ -303,16 +303,16 @@ if params["save_output"]:
         uh_dict[i].name  = "u_" + str(i)
     
     # potentials xdmf
-    out_sol = dfx.io.XDMFFile(comm, "output/solution.xdmf", "w")
+    out_sol = dfx.io.XDMFFile(comm, "output/solution-" + params["out_name"] + ".xdmf", "w")
     out_sol.write_mesh(mesh)            
         
     # memebrane potential xdmf
-    out_v = dfx.io.XDMFFile(comm, "output/v.xdmf" , "w")
+    out_v = dfx.io.XDMFFile(comm, "output/v-" + params["out_name"] + ".xdmf" , "w")
     out_v.write_mesh(mesh)
     out_v.write_function(v, t)
 
     # save subdomain data, needed for parallel visualizaiton
-    with dfx.io.XDMFFile(comm, "output/tags.xdmf", "w") as out_tags:                
+    with dfx.io.XDMFFile(comm, "output/tags-" + params["out_name"] + ".xdmf", "w") as out_tags:                
         out_tags.write_mesh(mesh)            
         out_tags.write_meshtags(subdomains, mesh.geometry)
         out_tags.write_meshtags(boundaries, mesh.geometry)        

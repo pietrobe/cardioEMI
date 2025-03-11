@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Xdmf xmlns:xi="https://www.w3.org/2001/XInclude" Version="3.0">
+  <Domain>
+    <Grid Name="mesh" GridType="Uniform">
+      <Topology TopologyType="Tetrahedron" NumberOfElements="64910">
+        <DataItem Dimensions="64910 4" NumberType="Int" Format="HDF">../output/robin-h21-25.h5:/Mesh/mesh/topology</DataItem>
+      </Topology>
+      <Geometry GeometryType="XYZ">
+        <DataItem Dimensions="11479 3" Format="HDF">../output/robin-h21-25.h5:/Mesh/mesh/geometry</DataItem>
+      </Geometry>
+    </Grid>
+    <Grid Name="facet_tags" GridType="Uniform">
+      <xi:include xpointer="xpointer(/Xdmf/Domain/Grid/Geometry)"/>
+      <Topology TopologyType="Triangle" NumberOfElements="130768">
+        <DataItem Dimensions="130768 3" NumberType="Int" Format="HDF">../output/robin-h21-25.h5:/Mesh/facet_tags/topology</DataItem>
+      </Topology>
+      <Attribute Name="facet_tags" AttributeType="Scalar" Center="Cell">
+        <DataItem Dimensions="130768" Format="HDF">../output/robin-h21-25.h5:/Mesh/facet_tags/Values</DataItem>
+      </Attribute>
+    </Grid>
+    <Grid Name="cell_tags" GridType="Uniform">
+      <xi:include xpointer="xpointer(/Xdmf/Domain/Grid/Geometry)"/>
+      <Topology TopologyType="Tetrahedron" NumberOfElements="64910">
+        <DataItem Dimensions="64910 4" NumberType="Int" Format="HDF">../output/robin-h21-25.h5:/Mesh/cell_tags/topology</DataItem>
+      </Topology>
+      <Attribute Name="cell_tags" AttributeType="Scalar" Center="Cell">
+        <DataItem Dimensions="64910" Format="HDF">../output/robin-h21-25.h5:/Mesh/cell_tags/Values</DataItem>
+      </Attribute>
+    </Grid>
+  </Domain>
+</Xdmf>

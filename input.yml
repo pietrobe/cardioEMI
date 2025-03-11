@@ -1,26 +1,25 @@
-# Spatial parameters 
-mesh_file             : "data/square_mesh_64_1_refined.xdmf"
-tags_dictionary_file  : "data/membrane_tags_dict.pickle"
-mesh_conversion_factor: 1 
+mesh_file             : "data/robin-h11-15.xdmf"
+tags_dictionary_file  : "data/robin-h11-15.pickle"
+mesh_conversion_factor: 0.0001 
 fem_order: 1
 
 # Temporal parameters 
-dt         : 0.00002
-time_steps : 200
+dt         : 0.005
+time_steps : 500
 
 # Physical parameters 
-C_M       : 0.01
-sigma_i   : "ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
+C_M       : 1
+sigma_i   : 5 #"ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
 sigma_e   : 1
-R_g       : 0.1
+R_g       : 0.003
 
 # Initial membrane potential
-v_init:  "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
+v_init: "-80 * (x[0] > 0.0)"
 
 # Ionic model
 ionic_model: 
   intra_intra: "Passive"
-  intra_extra: "HH"
+  intra_extra: "AP"
 
 # Solver 
 ksp_type: "preonly"
@@ -29,5 +28,6 @@ ksp_rtol: 1e-7
 
 # Output 
 save_output  : True
-save_interval: 5
+save_interval: 1
 verbose      : False
+out_name     : "sigma_e_1" # this name is appended to v, solution and tags in the output file
