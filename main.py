@@ -358,7 +358,7 @@ for time_step in range(params["time_steps"]):
                 if i < j:
                     ij_tuple = (i,j)                                        
                     L_coeff  = 1
-                    with vij_dict[ij_tuple].vector.localForm() as v_local:
+                    with vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
 
                         t_ODE = time.perf_counter()
                         
@@ -369,7 +369,7 @@ for time_step in range(params["time_steps"]):
                     ij_tuple = (j,i)
                     L_coeff  = -1                    
                     
-                with fg_dict[ij_tuple].vector.localForm() as fg_local, vij_dict[ij_tuple].vector.localForm() as v_local:
+                with fg_dict[ij_tuple].x.petsc_vec.localForm() as fg_local, vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
 
                     fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
 
@@ -422,7 +422,7 @@ for time_step in range(params["time_steps"]):
     dofmap_list = (N_TAGS) * [V.dofmap]
     with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(sol_vec, dofmap_list, restriction) as uij_wrapper:
         for ui_ue_wrapper_local, component in zip(uij_wrapper, tuple(uh_dict.values())): 
-            with component.vector.localForm() as component_local:
+            with component.x.petsc_vec.localForm() as component_local:
                 component_local[:] = ui_ue_wrapper_local
 
     for i in TAGS:
