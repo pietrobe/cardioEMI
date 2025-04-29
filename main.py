@@ -1,6 +1,7 @@
 import ufl
 import time
 import pickle 
+import random
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
 import dolfinx  as dfx
@@ -177,6 +178,40 @@ for i in TAGS:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True, V=V)
+
+
+
+####### TEST for BC #######
+
+Dirichletbc = True
+
+bcs = []
+
+if Dirichletbc:
+    
+    number_of_Dirichlet_points = 10
+
+    # Mark boundary facets by checking if a facet has no adjacent cell on the "outside"
+    boundary_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
+
+    # Apply zero Dirichlet condition
+    zero = dfx.fem.Constant(mesh, 0.0)        
+
+    for i in TAGS:
+    
+        # Get DOFs associated with those boundary facets
+        boundary_dofs_i = dfx.fem.locate_dofs_topological(V_dict[i], mesh.topology.dim - 1, boundary_facets)        
+
+        if i == ECS_TAG:
+            boundary_dofs_i = boundary_dofs_i[:number_of_Dirichlet_points]
+
+            print(type(boundary_dofs_i))
+
+        bc_i = dfx.fem.dirichletbc(zero, boundary_dofs_i, V_dict[i])    
+    
+        bcs.append(bc_i)    
+
+##############
         
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
@@ -233,7 +268,7 @@ t1 = time.perf_counter()
 # #---------------------------#
 
 # Assemble the block linear system matrix
-A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
+A = multiphenicsx.fem.petsc.assemble_matrix_block(a, bcs=bcs, restriction=(restriction, restriction))
 A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
@@ -248,20 +283,21 @@ if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f
 #        CREATE NULLSPACE         #
 #---------------------------------#
 
-# Create the PETSc nullspace vector and check that it is a valid nullspace of A
-nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
-assert nullspace.test(A)
-# For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
-# sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
-# Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
-A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
-A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
-# Set the nullspace
-if params["ksp_type"] == "cg":
-    A.setNullSpace(nullspace)
-    A.setNearNullSpace(nullspace)
-else: # direct solver
-    A.setNullSpace(nullspace)
+if not Dirichletbc:
+    # Create the PETSc nullspace vector and check that it is a valid nullspace of A
+    nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
+    assert nullspace.test(A)
+    # For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
+    # sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
+    # Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
+    A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
+    A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
+    # Set the nullspace
+    if params["ksp_type"] == "cg":
+        A.setNullSpace(nullspace)
+        A.setNearNullSpace(nullspace)
+    else: # direct solver
+        A.setNullSpace(nullspace)
 
 #---------------------------------#
 #      CONFIGURE SOLVER           #
@@ -362,7 +398,7 @@ for time_step in range(params["time_steps"]):
 
                         t_ODE = time.perf_counter()
                         
-                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])             
+                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])          
 
                         ODEs_time += time.perf_counter() - t_ODE 
                 else:
@@ -393,7 +429,7 @@ for time_step in range(params["time_steps"]):
     # Clear RHS vector to avoid accumulation and assemble RHS
     b.array[:] = 0
     b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-    multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, restriction=restriction) # Assemble RHS vector        
+    multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, bcs=bcs, restriction=restriction) # Assemble RHS vector        
         
     # dump(b, 'output/bvec')
         
@@ -403,8 +439,9 @@ for time_step in range(params["time_steps"]):
         # Create solution vector
         sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)        
 
-    # if the timestep is not zero, b changes anyway and the nullspace must be removed
-    nullspace.remove(b)
+    if not Dirichletbc:
+        # if the timestep is not zero, b changes anyway and the nullspace must be removed
+        nullspace.remove(b)
     
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
     

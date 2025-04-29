@@ -5,16 +5,18 @@ fem_order: 1
 
 # Temporal parameters 
 dt         : 0.00002
-time_steps : 200
+time_steps : 800
 
 # Physical parameters 
 C_M       : 0.01
-sigma_i   : "ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
+# sigma_i   : "ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
+sigma_i   : 1
 sigma_e   : 1
 R_g       : 0.1
 
 # Initial membrane potential
 v_init:  "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
+
 
 # Ionic model
 ionic_model: 
@@ -28,5 +30,5 @@ ksp_rtol: 1e-7
 
 # Output 
 save_output  : True
-save_interval: 5
+save_interval: 10
 verbose      : False
