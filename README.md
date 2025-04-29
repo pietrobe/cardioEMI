@@ -19,14 +19,14 @@ cd cardioEMI
 To install FEniCSx:
 
 ```
-docker run -t -v $(pwd):/home/fenics -i ghcr.io/fenics/dolfinx/dolfinx:v0.7.1
+docker run -t -v $(pwd):/home/fenics -i ghcr.io/fenics/dolfinx/dolfinx:v0.9.0
 cd /home/fenics
 ```
 
-To install multiphenicsx in the docker container:
+To install dependencies:
 
 ```
-pip install multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1
+pip install --no-build-isolation -r requirements.txt
 ```
 
 ### Testing the installation
