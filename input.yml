@@ -1,4 +1,4 @@
-mesh_file             : "data/square_mesh_64_1_refined.xdmf"
+mesh_file             : "data/square_mesh_64_1.xdmf"
 tags_dictionary_file  : "data/membrane_tags_dict.pickle"
 mesh_conversion_factor: 1 
 fem_order: 1
@@ -17,6 +17,8 @@ R_g       : 0.1
 # Initial membrane potential
 v_init:  "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
 
+# boundary conditions 
+Dirichlet_points: 1
 
 # Ionic model
 ionic_model: 

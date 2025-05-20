@@ -1,7 +1,6 @@
 import ufl
 import time
 import pickle 
-import random
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
 import dolfinx  as dfx
@@ -181,35 +180,52 @@ for i in TAGS:
 
 
 
-####### TEST for BC #######
-
-Dirichletbc = True
+####### BC #######
+number_of_Dirichlet_points = params['Dirichlet_points']
+Dirichletbc = (number_of_Dirichlet_points > 0) 
 
 bcs = []
 
 if Dirichletbc:
-    
-    number_of_Dirichlet_points = 10
-
-    # Mark boundary facets by checking if a facet has no adjacent cell on the "outside"
-    boundary_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
 
     # Apply zero Dirichlet condition
     zero = dfx.fem.Constant(mesh, 0.0)        
 
+    # identify local boundary DOFs + coords
+    boundary_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
+    local_bdofs = dfx.fem.locate_dofs_topological(V, mesh.topology.dim-1, boundary_facets)
+    coords = V.tabulate_dof_coordinates()
+    local_coords = coords[local_bdofs]      # shape (n_loc, gdim)
+
+    # local to global
+    imap = V.dofmap.index_map
+    first_global = imap.local_range[0]       # first global index on this rank
+    local_global_bdofs = first_global + local_bdofs
+
+    # gather everyone’s cands to rank 0
+    all_globals = comm.gather(local_global_bdofs, root=0)
+    all_coords  = comm.gather(local_coords,      root=0)
+
+    # on rank 0 pick the 10 “corner‐nearest” by taxi‐distance
+    if comm.rank == 0:
+        G  = np.concatenate(all_globals)
+        C  = np.vstack(all_coords)
+        scores = C.sum(axis=1)
+        chosen_global = G[np.argsort(scores)[:number_of_Dirichlet_points]]
+    else:
+        chosen_global = None
+
+    # broadcast the final 10 GLOBAL DOFs to everyone
+    chosen_global = comm.bcast(chosen_global, root=0)
+
+    # each rank picks from its local globals, maps back to local indices
+    mask = np.isin(local_global_bdofs, chosen_global)
+    local_chosen = local_bdofs[mask].astype(np.int32)
+
+    # impose BCs only on these local_chosen
     for i in TAGS:
-    
-        # Get DOFs associated with those boundary facets
-        boundary_dofs_i = dfx.fem.locate_dofs_topological(V_dict[i], mesh.topology.dim - 1, boundary_facets)        
-
-        if i == ECS_TAG:
-            boundary_dofs_i = boundary_dofs_i[:number_of_Dirichlet_points]
-
-            print(type(boundary_dofs_i))
-
-        bc_i = dfx.fem.dirichletbc(zero, boundary_dofs_i, V_dict[i])    
-    
-        bcs.append(bc_i)    
+        bc_i = dfx.fem.dirichletbc(zero, local_chosen, V_dict[i])
+        bcs.append(bc_i)
 
 ##############
         
@@ -465,7 +481,8 @@ for time_step in range(params["time_steps"]):
     for i in TAGS:
         for j in TAGS:
             if i < j:                
-                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
+                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array # TODO test otehr order?
+                
     
     # fill v for visualization
     v.x.array[:] = uh_dict[ECS_TAG].x.array

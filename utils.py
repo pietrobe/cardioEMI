@@ -50,6 +50,19 @@ def read_input_field(expression: Union[str, float, int], mesh=None):
     else:
         raise ValueError("Expression must be a string, int, or float.")
 
+
+def parse_nonneg_int(s):
+    try:
+        i = int(s)
+    except ValueError:
+        raise ValueError(f"Invalid input “{s}”: not an integer.")
+    if i < 0:
+        raise ValueError(f"Invalid input “{s}”: must be ≥ 0.")
+
+    if i != s:
+        raise ValueError(f"Invalid input “{s}”: must be integer")
+    
+
 # read yml file
 def read_input_file(input_yml_file):
         
@@ -132,8 +145,7 @@ def read_input_file(input_yml_file):
             input_parameters['R_g'] = config['R_g']
         else:
             input_parameters['R_g'] = 1.0
-        
-                    
+                            
         # finite element polynomial order (dafult 1) 
         if 'fem_order' in config: 
             input_parameters['P'] = config['fem_order']
@@ -145,6 +157,13 @@ def read_input_file(input_yml_file):
             input_parameters['v_init'] = config['v_init']
         else:
             raise KeyError(f"Set v_init in input file!")
+
+        # boundary conditions (default = 0 -> zero Neumann)
+        if 'Dirichlet_points' in config: 
+            input_parameters['Dirichlet_points'] = config['Dirichlet_points']
+        else:
+            input_parameters['Dirichlet_points'] = 0
+
             
 
         # ionic model 
@@ -197,6 +216,12 @@ def read_input_file(input_yml_file):
         else:
             input_parameters['out_name'] = ''            
             # raise SyntaxError(f'INPUT ERROR: provide name of output in input .yml file.')
+
+
+        # sanuty checks
+        parse_nonneg_int(input_parameters['P'])
+        parse_nonneg_int(input_parameters['time_steps'])
+        parse_nonneg_int(input_parameters['Dirichlet_points'])
                 
         return input_parameters
      
