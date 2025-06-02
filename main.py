@@ -81,6 +81,14 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
 
     boundaries = xdmf.read_meshtags(mesh, name="facet_tags")
 
+    if cuda and comm.size > 1:
+        mesh = cufem.ghost_layer_mesh(mesh)
+        subdomains = cufem.ghost_layer_meshtags(subdomains, mesh)
+        boundaries = cufem.ghost_layer_meshtags(boundaries, mesh)
+        # Recreate connectivities as we have a new mesh
+        mesh.topology.create_connectivity(mesh.topology.dim-1, mesh.topology.dim)
+        mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim)
+
 # Scale mesh
 mesh.geometry.x[:] *= params["mesh_conversion_factor"]
 
@@ -158,16 +166,19 @@ for i in TAGS:
 
     # Get indices of the cells of the intra- and extracellular subdomains
     cells_Omega_i = subdomains.indices[subdomains.values == i]
-
+    
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
+    print(dofs_Vi_Omega_i.max(), V_i.dofmap.index_map.size_local)
     tot_dofs += len(dofs_Vi_Omega_i)
-    if comm.rank == 0: print(f"Total dofs on tag {i}", len(dofs_Vi_Omega_i))
     # Define the restrictions of the subdomains
     restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
-    restriction_dof_list.append(dofs_Vi_Omega_i)
+    if cuda:
+        restriction_dof_list.append(dofs_Vi_Omega_i[dofs_Vi_Omega_i<V_i.dofmap.index_map.size_local])
+        print(f"Rank {comm.rank}: Total dofs on tag {i}", len(restriction_dof_list[-1]))
     restriction.append(restriction_Vi_Omega_i)
-if comm.rank == 0: print("Sum of dofs across tags", tot_dofs, " total ", V.dofmap.index_map.size_global)
+#if comm.rank == 0: print("Sum of dofs across tags", tot_dofs, " total ", V.dofmap.index_map.size_global)
+print(f"Rank {comm.rank}: sum of all dofs is {tot_dofs}")
 # timers
 if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter()
@@ -213,7 +224,6 @@ for i in TAGS:
         u_j  = u_dict[j]
 
         membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))   
-
         # if cells i and j have a membrane in common
         if len(membrane_ij) > 0:                 
 
@@ -242,6 +252,8 @@ t1 = time.perf_counter()
 # Assemble the block linear system matrix
 A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
 A.assemble()
+print(f"A sizes on rank {comm.rank}: ",A.getSize(), A.getLocalSize())
+print("A norm", A.norm())
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
@@ -378,7 +390,7 @@ for time_step in range(params["time_steps"]):
                 else:
                     ij_tuple = (j,i)
                     L_coeff  = -1                    
-                    
+                if ij_tuple != (0,1): L_coeff = 1e-16    
                 with fg_dict[ij_tuple].x.petsc_vec.localForm() as fg_local, vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
 
                     fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
@@ -414,7 +426,21 @@ for time_step in range(params["time_steps"]):
         b.array[:] = 0
         b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
         multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, restriction=restriction) # Assemble RHS vector        
-        
+    print("b norm", b.norm())
+    if cuda:
+        offset = 0
+        coords = V.tabulate_dof_coordinates()
+        point = np.array([ 0.02565673,  0.00653478, -0.00100797])
+        query_dof = 0
+        for dof, coord in enumerate(coords):
+            if np.allclose(coord, point): query_dof = dof
+        for i, restriction_dofs in zip(TAGS, restriction_dof_list):
+            arr = b.array[offset:offset+len(restriction_dofs)]
+            matches = np.where(restriction_dofs==query_dof)[0]
+            if len(matches):
+                print(i, offset+matches, arr[matches])
+            print(comm.rank, i, offset, comm.allreduce(arr.sum()), arr.max(), np.argmax(arr), coords[restriction_dofs[np.argmax(arr)]], restriction_dofs[np.argmax(arr)])
+            offset += len(restriction_dofs)
     # dump(b, 'output/bvec')
         
     # Neumann BC
@@ -433,7 +459,7 @@ for time_step in range(params["time_steps"]):
     ksp.solve(b, sol_vec)
     # store iterisons 
     ksp_iterations.append(ksp.getIterationNumber())
-
+    print("sol vec norm", sol_vec.norm())
     if not cuda:
         # Update ghost values
         sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
@@ -452,6 +478,7 @@ for time_step in range(params["time_steps"]):
                 with component.x.petsc_vec.localForm() as component_local:
                     component_local[:] = ui_ue_wrapper_local
 
+    raise ValueError()
     for i in TAGS:
         for j in TAGS:
             if i < j:                
