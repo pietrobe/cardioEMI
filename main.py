@@ -417,7 +417,6 @@ for time_step in range(params["time_steps"]):
             # Create right-hand side and solution vectors        
             b       = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
             sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
-        if comm.rank == 0: print("size of b", b.getSize())
 
     if cuda:
         asm.assemble_vector_block(L, cuda_b)
@@ -426,21 +425,6 @@ for time_step in range(params["time_steps"]):
         b.array[:] = 0
         b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
         multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, restriction=restriction) # Assemble RHS vector        
-    print("b norm", b.norm())
-    if cuda:
-        offset = 0
-        coords = V.tabulate_dof_coordinates()
-        point = np.array([ 0.02565673,  0.00653478, -0.00100797])
-        query_dof = 0
-        for dof, coord in enumerate(coords):
-            if np.allclose(coord, point): query_dof = dof
-        for i, restriction_dofs in zip(TAGS, restriction_dof_list):
-            arr = b.array[offset:offset+len(restriction_dofs)]
-            matches = np.where(restriction_dofs==query_dof)[0]
-            if len(matches):
-                print(i, offset+matches, arr[matches])
-            print(comm.rank, i, offset, comm.allreduce(arr.sum()), arr.max(), np.argmax(arr), coords[restriction_dofs[np.argmax(arr)]], restriction_dofs[np.argmax(arr)])
-            offset += len(restriction_dofs)
     # dump(b, 'output/bvec')
         
     # Neumann BC
@@ -459,7 +443,6 @@ for time_step in range(params["time_steps"]):
     ksp.solve(b, sol_vec)
     # store iterisons 
     ksp_iterations.append(ksp.getIterationNumber())
-    print("sol vec norm", sol_vec.norm())
     if not cuda:
         # Update ghost values
         sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
@@ -469,6 +452,7 @@ for time_step in range(params["time_steps"]):
         offset = 0
         for i, restriction_dofs in zip(TAGS, restriction_dof_list):
             uh_dict[i].x.array[restriction_dofs] = sol_vec.array[offset:offset+len(restriction_dofs)]
+            uh_dict[i].x.scatter_forward()
             offset += len(restriction_dofs)
 
     else:
@@ -478,7 +462,6 @@ for time_step in range(params["time_steps"]):
                 with component.x.petsc_vec.localForm() as component_local:
                     component_local[:] = ui_ue_wrapper_local
 
-    raise ValueError()
     for i in TAGS:
         for j in TAGS:
             if i < j:                
