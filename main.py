@@ -4,6 +4,7 @@ import pickle
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc 
 import dolfinx  as dfx
+import json
 from ufl      import inner, grad
 from sys      import argv, stdout
 from mpi4py   import MPI
@@ -195,7 +196,7 @@ for i in TAGS:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True, V=V)
-        
+if comm.rank == 0: print(f"making ionic models: {time.perf_counter() - t1:.2f} seconds")        
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
@@ -263,6 +264,7 @@ else:
   A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
   A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
+matrix_assemble_time = assemble_time
 
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
 
@@ -317,8 +319,10 @@ if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":
     opts.setValue('ksp_rtol', params["ksp_rtol"])
     opts.setValue('ksp_converged_reason', None)
 
-if params['pc_type'] == "hypre" and mesh.geometry.dim == 3:
-    opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.7)
+if params['pc_type'] == "hypre":
+    opts.setValue("pc_hypre_boomeramg_relax_type_all", "l1scaled-SOR/Jacobi")
+    if mesh.geometry.dim == 3:
+        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.7)
 
 ksp.setFromOptions()
 
@@ -424,7 +428,7 @@ for time_step in range(params["time_steps"]):
             # Create right-hand side and solution vectors        
             b       = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
             sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
-
+        vector_assemble_setup_time = time.perf_counter() - t_test
     if cuda:
         asm.assemble_vector_block(L, cuda_b)
     else:
@@ -444,6 +448,7 @@ for time_step in range(params["time_steps"]):
     nullspace.remove(b)
     
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
+
     
     # Solve the system
     t1 = time.perf_counter() # Timestamp for solver time-lapse
@@ -500,6 +505,9 @@ max_local_assemble_time = comm.allreduce(assemble_time, op=MPI.MAX) # Global ass
 max_local_solve_time    = comm.allreduce(solve_time   , op=MPI.MAX) # Global solve time
 max_local_ODE_time      = comm.allreduce(ODEs_time    , op=MPI.MAX) # Global ODEs time
 max_local_setup_time    = comm.allreduce(setup_time   , op=MPI.MAX) # Global setup time
+max_local_matrix_assemble_time = comm.allreduce(matrix_assemble_time, op=MPI.MAX)
+max_local_vector_assemble_time = comm.allreduce(assemble_time-matrix_assemble_time, op=MPI.MAX)
+max_local_vector_assemble_setup_time = comm.allreduce(vector_assemble_setup_time, op=MPI.MAX)
 total_time = max_local_assemble_time + max_local_solve_time + max_local_ODE_time + max_local_setup_time
 
 # Print stuff
@@ -540,3 +548,18 @@ if params["save_output"]:
     if comm.rank == 0: 
         print("\nSolution saved in output folder")    
         print(f"Total script time (with output): {time.perf_counter() - start_time:.3f} seconds\n")
+
+if params["save_performance"] and comm.rank == 0:
+    stats = {
+        "setup": max_local_setup_time,
+        "assemble": max_local_assemble_time,
+        "matrix_assemble": max_local_matrix_assemble_time,
+        "vector_assemble_setup": max_local_vector_assemble_setup_time,
+        "vector_assemble": max_local_vector_assemble_time,
+        "solve": max_local_solve_time,
+        "ionic": max_local_ODE_time,
+        "total": total_time,
+    }
+    with open(params["out_name"]+f"-stats-{'cuda' if cuda else 'cpu'}-{comm.size}.json", "w") as fp:
+        json.dump({"input": params, "performance": stats}, fp)
+
