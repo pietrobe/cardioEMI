@@ -159,6 +159,7 @@ v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:]
 ##### Restrictions #####
 restriction = []
 restriction_dof_list = []
+restriction_local_sizes = []
 tot_dofs = 0
 for i in TAGS:
 
@@ -169,16 +170,15 @@ for i in TAGS:
     
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
-    print(dofs_Vi_Omega_i.max(), V_i.dofmap.index_map.size_local)
     tot_dofs += len(dofs_Vi_Omega_i)
     # Define the restrictions of the subdomains
     restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
     if cuda:
-        restriction_dof_list.append(dofs_Vi_Omega_i[dofs_Vi_Omega_i<V_i.dofmap.index_map.size_local])
-        print(f"Rank {comm.rank}: Total dofs on tag {i}", len(restriction_dof_list[-1]))
+        restriction_dof_list.append(dofs_Vi_Omega_i)
+        local_size = int(sum(dofs_Vi_Omega_i<V_i.dofmap.index_map.size_local))
+        restriction_local_sizes.append(local_size)
     restriction.append(restriction_Vi_Omega_i)
 #if comm.rank == 0: print("Sum of dofs across tags", tot_dofs, " total ", V.dofmap.index_map.size_global)
-print(f"Rank {comm.rank}: sum of all dofs is {tot_dofs}")
 # timers
 if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
 t1 = time.perf_counter()
@@ -238,8 +238,13 @@ for i in TAGS:
 
     a.append(a_i)
 
-# Convert form to dolfinx form
-a = dfx.fem.form(a, jit_options=jit_parameters)
+if cuda:
+    asm = cufem.CUDAAssembler()
+    cuda_a = cufem.form(a, restriction=(restriction_dof_list, restriction_dof_list))
+    cuda_A = asm.create_matrix_block(cuda_a)
+else:
+    # Converte form to dolfinx form
+    a = dfx.fem.form(a, jit_options=jit_parameters)
 
 # timers
 if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f} seconds")
@@ -249,11 +254,14 @@ t1 = time.perf_counter()
 # #      MATRIX ASSEMBLY      #
 # #---------------------------#
 
-# Assemble the block linear system matrix
-A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
-A.assemble()
-print(f"A sizes on rank {comm.rank}: ",A.getSize(), A.getLocalSize())
-print("A norm", A.norm())
+if cuda:
+  asm.assemble_matrix_block(cuda_a, cuda_A)
+  cuda_A.assemble()
+  A = cuda_A.mat
+else:
+  # Assemble the block linear system matrix
+  A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
+  A.assemble()
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
@@ -405,7 +413,6 @@ for time_step in range(params["time_steps"]):
     # create some data structures
     if time_step == 0: 
         if cuda:
-            asm = cufem.CUDAAssembler()
             L = cufem.form(L_list, restriction=restriction_dof_list)
             cuda_b = asm.create_vector_block(L)
             b = cuda_b.vector
@@ -450,10 +457,10 @@ for time_step in range(params["time_steps"]):
     # Extract sub-components of solution
     if cuda:
         offset = 0
-        for i, restriction_dofs in zip(TAGS, restriction_dof_list):
-            uh_dict[i].x.array[restriction_dofs] = sol_vec.array[offset:offset+len(restriction_dofs)]
+        for i, restriction_dofs, size in zip(TAGS, restriction_dof_list, restriction_local_sizes):
+            uh_dict[i].x.array[restriction_dofs[:size]] = sol_vec.array[offset:offset+size]
             uh_dict[i].x.scatter_forward()
-            offset += len(restriction_dofs)
+            offset += size
 
     else:
         dofmap_list = (N_TAGS) * [V.dofmap]
