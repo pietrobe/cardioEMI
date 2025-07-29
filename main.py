@@ -75,13 +75,14 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim)
 
     boundaries = xdmf.read_meshtags(mesh, name="facet_tags")
-
+    
 # Scale mesh
 mesh.geometry.x[:] *= params["mesh_conversion_factor"]
 
 # timers
 if comm.rank == 0: print(f"Reading input time:     {time.perf_counter() - start_time:.2f} seconds")
 t1 = time.perf_counter()
+
 
 # Define integral measures
 dx = ufl.Measure("dx", subdomain_data=subdomains) # Cell integrals
@@ -91,6 +92,13 @@ dS = ufl.Measure("dS", subdomain_data=boundaries) # Facet integrals
 sigma_i = read_input_field(params['sigma_i'], mesh=mesh)
 sigma_e = read_input_field(params['sigma_e'], mesh=mesh)
 tau     = dt/params["C_M"]
+
+# add electrode conductivity if present
+using_electrode = ("sigma_electrode" in params)
+
+if using_electrode:    
+    sigma_electrode = read_input_field(params['sigma_electrode'], mesh=mesh)
+    ELECTRODE_TAG   = params["ELECTRODE_TAG"]
 
 #------------------------------------------#
 #     FUNCTION SPACES AND RESTRICTIONS     #
@@ -153,6 +161,10 @@ for i in TAGS:
     # Get indices of the cells of the intra- and extracellular subdomains
     cells_Omega_i = subdomains.indices[subdomains.values == i]
 
+    if i == ECS_TAG and using_electrode:        
+        cells_Omega_electrode = subdomains.indices[subdomains.values == ELECTRODE_TAG]      
+        cells_Omega_i = np.concatenate([cells_Omega_i, cells_Omega_electrode])                          
+
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
     
@@ -177,7 +189,6 @@ for i in TAGS:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True, V=V)
-
 
 
 ####### BC #######
@@ -261,10 +272,15 @@ for i in TAGS:
         # if cells i and j have a membrane in common
         if len(membrane_ij) > 0:                 
 
-            if i == j:                                
-                a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)
-            else:
-                a_ij = - inner(u_j('+'), v_i('-')) * dS(membrane_ij)            
+            if i == j:                                                                
+                
+                a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)   
+
+                if i == ECS_TAG and using_electrode:
+                    a_ij +=  tau * inner(sigma_electrode * grad(u_j), grad(v_i)) * dx(ELECTRODE_TAG)                       
+
+            else:                                
+                a_ij = - inner(u_j('+'), v_i('-')) * dS(membrane_ij)                                      
         else:
             a_ij = None
 
@@ -290,10 +306,11 @@ assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly ti
 
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
 
-# Save A
-# dump(A, 'output/A_robin.mat')
-# Plot sparsity pattern 
-# plot_sparsity_pattern(A)
+# # Save A
+# save_petsc_matrix_to_matlab(A, 'output/A.mat','A')
+# # Plot sparsity pattern 
+# save_sparsity_pattern(A, 'output/sparsity.png')
+# exit()
 
 #---------------------------------#
 #        CREATE NULLSPACE         #
@@ -309,12 +326,10 @@ if not Dirichletbc:
     A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
     A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
     # Set the nullspace
-    if params["ksp_type"] == "cg":
-        A.setNullSpace(nullspace)
+    A.setNullSpace(nullspace)
+    if params["ksp_type"] == "cg":        
         A.setNearNullSpace(nullspace)
-    else: # direct solver
-        A.setNullSpace(nullspace)
-
+    
 #---------------------------------#
 #      CONFIGURE SOLVER           #
 #---------------------------------#
@@ -481,7 +496,7 @@ for time_step in range(params["time_steps"]):
     for i in TAGS:
         for j in TAGS:
             if i < j:                
-                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array # TODO test otehr order?
+                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array # TODO test other order?
                 
     
     # fill v for visualization

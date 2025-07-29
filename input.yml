@@ -1,21 +1,25 @@
-mesh_file             : "data/square_mesh_64_1.xdmf"
-tags_dictionary_file  : "data/membrane_tags_dict.pickle"
-mesh_conversion_factor: 1 
+mesh_file             : "data/robin-24335.xdmf"
+tags_dictionary_file  : "data/robin-24335.pickle"
+mesh_conversion_factor: 0.0001
 fem_order: 1
 
 # Temporal parameters 
-dt         : 0.00002
-time_steps : 800
+dt         : 0.001
+time_steps : 1000
 
 # Physical parameters 
-C_M       : 0.01
+C_M       : 1
 # sigma_i   : "ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
-sigma_i   : 1
-sigma_e   : 1
-R_g       : 0.1
+sigma_i   : 4
+sigma_e   : 20
+R_g       : 0.003
+
+# # electrode data
+# ELECTRODE_TAG : 10000
+# sigma_electrode : 0.00001
 
 # Initial membrane potential
-v_init:  "(-0.067) * (x[0]*x[0] + x[1]*x[1] > 0.1)"
+v_init: "(-80.0) * (x[0] > 0.009)"
 
 # boundary conditions 
 Dirichlet_points: 1
@@ -23,7 +27,7 @@ Dirichlet_points: 1
 # Ionic model
 ionic_model: 
   intra_intra: "Passive"
-  intra_extra: "HH"
+  intra_extra: "AP"
 
 # Solver 
 ksp_type: "preonly"
@@ -32,5 +36,6 @@ ksp_rtol: 1e-7
 
 # Output 
 save_output  : True
-save_interval: 10
+save_interval: 1
 verbose      : False
+out_name     : "try"

@@ -139,6 +139,14 @@ def read_input_file(input_yml_file):
             input_parameters['sigma_e'] = config['sigma_e']
         else:
             input_parameters['sigma_e'] = 1.0
+        
+        if 'ELECTRODE_TAG' in config: 
+            input_parameters['ELECTRODE_TAG'] = config['ELECTRODE_TAG']
+
+            if 'sigma_electrode' in config: 
+                input_parameters['sigma_electrode'] = config['sigma_electrode']                       
+            else:
+                print(f"WARNING: ELECTRODE_TAG with no sigma_electrode in input file!")            
 
         # Resistance 
         if 'R_g' in config: 
@@ -250,6 +258,24 @@ def dump(thing, path):
     assert np.all(np.isfinite(m.data))
     return np.save(path, np.c_[m.row, m.col, m.data]), sio.savemat(path, {name: m})
 
+def save_petsc_matrix_to_matlab(A, filename="A.mat", varname="A"):
+    """
+    Convert a PETSc matrix A to SciPy CSR and save it in MATLAB .mat format.
+    
+    Parameters:
+        A        : PETSc.Mat (assembled matrix)
+        filename : str, output .mat file
+        varname  : str, variable name in MATLAB
+    """
+    # Convert PETSc matrix to CSR format
+    ai, aj, av = A.getValuesCSR()
+    rows, cols = A.getSize()
+    csr = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
+
+    # Save as MATLAB .mat file
+    sio.savemat(filename, {varname: csr})
+
+
 
 def common_elements(set1, set2):    
     return set1.intersection(set2)
@@ -264,3 +290,18 @@ def plot_sparsity_pattern(A):
     plt.xlabel("Column Index")
     plt.ylabel("Row Index")
     plt.show()
+
+
+def save_sparsity_pattern(A, filename="sparsity.png"):
+    ai, aj, av = A.getValuesCSR()
+    rows, cols = A.getSize()
+    sparse_matrix = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
+
+    plt.figure(figsize=(8, 8))
+    plt.spy(sparse_matrix, markersize=1)
+    plt.title("Sparsity Pattern of the Matrix")
+    plt.xlabel("Column Index")
+    plt.ylabel("Row Index")
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300)
+    plt.close()  # prevent display in some backends
