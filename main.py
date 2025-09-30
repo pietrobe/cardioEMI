@@ -1,8 +1,8 @@
 import ufl
 import time
-import pickle 
+import pickle
 import multiphenicsx.fem
-import multiphenicsx.fem.petsc 
+import multiphenicsx.fem.petsc
 import dolfinx  as dfx
 import matplotlib.pyplot as plt
 from ufl      import inner, grad
@@ -32,13 +32,13 @@ ODEs_time     = 0
 start_time = time.perf_counter()
 
 # MPI communicator
-comm = MPI.COMM_WORLD 
+comm = MPI.COMM_WORLD
 
-if comm.rank == 0: 
+if comm.rank == 0:
     print("\n#-----------SETUP----------#")
-    print("Processing input file:", argv[1])      
+    print("Processing input file:", argv[1])
 
-# Read input file 
+# Read input file
 params = read_input_file(argv[1])
 
 # aliases
@@ -53,7 +53,7 @@ v_init = Read_input_field(params['v_init'])
 #          MESH         #
 #-----------------------#
 
-if comm.rank == 0: print("Input mesh file:", mesh_file)       
+if comm.rank == 0: print("Input mesh file:", mesh_file)
 
 with open(params["tags_dictionary_file"], "rb") as f:
     membrane_tags = pickle.load(f)
@@ -66,7 +66,7 @@ N_TAGS = len(TAGS)
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     # Read mesh and cell tags
     mesh       = xdmf.read_mesh(ghost_mode=dfx.mesh.GhostMode.shared_facet)
-    subdomains = xdmf.read_meshtags(mesh, name="cell_tags")    
+    subdomains = xdmf.read_meshtags(mesh, name="cell_tags")
 
     # Create facet-to-cell connectivity
     mesh.topology.create_connectivity(mesh.topology.dim-1, mesh.topology.dim)
@@ -82,7 +82,6 @@ mesh.geometry.x[:] *= params["mesh_conversion_factor"]
 # timers
 if comm.rank == 0: print(f"Reading input time:     {time.perf_counter() - start_time:.2f} seconds")
 t1 = time.perf_counter()
-
 
 # Define integral measures
 dx = ufl.Measure("dx", subdomain_data=subdomains) # Cell integrals
@@ -129,27 +128,26 @@ for i in TAGS:
     u_dict[i]  = ufl.TrialFunction(V_i)
     v_dict[i]  =  ufl.TestFunction(V_i)
     uh_dict[i] =  dfx.fem.Function(V_i)
-    
     # v_ij con i < j to avoid repetions
     for j in TAGS:
         if i < j:
             # Membrane potential and forcing term function
-            vij_dict[(i,j)] = dfx.fem.Function(V) 
+            vij_dict[(i,j)] = dfx.fem.Function(V)
             fg_dict[(i,j)]  = dfx.fem.Function(V)
         
-# init vij using initial membrane potential        
-for i in TAGS:    
+# init vij using initial membrane potential
+for i in TAGS:
 
     # interpolate v_init in intra_extra, intra_intra is 0 by default
-    if i < ECS_TAG:    
-        vij_dict[(i,ECS_TAG)].interpolate(v_init)    
-        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:] 
+    if i < ECS_TAG:
+        vij_dict[(i,ECS_TAG)].interpolate(v_init)
+        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:]
 
     elif i > ECS_TAG:
-        vij_dict[(ECS_TAG,i)].interpolate(v_init)    
-    
+        vij_dict[(ECS_TAG,i)].interpolate(v_init)
+
 # save membrane potential for visualization (valid only for extra-intra)
-v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:] 
+v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:]
 
 ##### Restrictions #####
 restriction = []
@@ -167,7 +165,7 @@ for i in TAGS:
 
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
-    
+
     # Define the restrictions of the subdomains
     restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
 
@@ -181,10 +179,10 @@ setup_time = t1 - start_time
 # set ionic models
 ionic_models = dict()
 
-for i in TAGS:        
+for i in TAGS:
     for j in TAGS:
 
-        if i < j:        
+        if i < j:
             if i == ECS_TAG or j == ECS_TAG:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
@@ -239,7 +237,6 @@ if Dirichletbc:
         bcs.append(bc_i)
 
 ##############
-        
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
@@ -252,14 +249,14 @@ for i in TAGS:
 
     a_i = []
 
-    # membranes tags for cell tag i 
+    # membranes tags for cell tag i
     membrane_i = membrane_tags[i]
 
     if i == ECS_TAG:
-        sigma = sigma_e # extra-cellular 
+        sigma = sigma_e # extra-cellular
 
     else:
-        sigma = sigma_i # intra-cellular         
+        sigma = sigma_i # intra-cellular
 
     v_i = v_dict[i]
     
@@ -270,9 +267,9 @@ for i in TAGS:
         membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))   
 
         # if cells i and j have a membrane in common
-        if len(membrane_ij) > 0:                 
+        if len(membrane_ij) > 0:
 
-            if i == j:                                                                
+            if i == j:                                                      
                 
                 a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)   
 
@@ -349,8 +346,8 @@ if params["verbose"]:
     opts.setValue('ksp_view', None)
     opts.setValue('ksp_monitor_true_residual', None)
 
-# for titerastive solvers set tolerance 
-if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":    
+# for iterative solvers set tolerance
+if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":
     opts.setValue('ksp_rtol', params["ksp_rtol"])
     opts.setValue('ksp_converged_reason', None)
 
@@ -395,11 +392,11 @@ if params["save_output"]:
 ksp_iterations = []
 I_ion = dict()
 
-if comm.rank == 0: print("\n#-----------SOLVE----------#")    
+if comm.rank == 0: print("\n#-----------SOLVE----------#")
 
 for time_step in range(params["time_steps"]):
 
-    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')        
+    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')
 
     # init data structure for linear form
     L_list = []
@@ -449,7 +446,7 @@ for time_step in range(params["time_steps"]):
     t_test = time.perf_counter()
     
     # create some data structures
-    if time_step == 0: 
+    if time_step == 0:
 
         # Convert form to dolfinx form                    
         L = dfx.fem.form(L_list, jit_options=jit_parameters) 
@@ -468,9 +465,8 @@ for time_step in range(params["time_steps"]):
         
     # Neumann BC
     if time_step == 0:
-        
         # Create solution vector
-        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)        
+        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
 
     if not Dirichletbc:
         # if the timestep is not zero, b changes anyway and the nullspace must be removed
