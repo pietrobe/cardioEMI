@@ -129,12 +129,9 @@ v.name = "v"
 
 for i in TAGS:
 
-    V_i = V.clone()
-
-    V_dict[i]  = V_i
-    u_dict[i]  = ufl.TrialFunction(V_i)
-    v_dict[i]  =  ufl.TestFunction(V_i)
-    uh_dict[i] =  dfx.fem.Function(V_i)
+    u_dict[i]  = ufl.TrialFunction(V)
+    v_dict[i]  =  ufl.TestFunction(V)
+    uh_dict[i] =  dfx.fem.Function(V)
     
     # v_ij con i < j to avoid repetions
     for j in TAGS:
@@ -164,7 +161,7 @@ restriction_local_sizes = []
 tot_dofs = 0
 for i in TAGS:
 
-    V_i = V_dict[i]
+    V_i = V
 
     # Get indices of the cells of the intra- and extracellular subdomains
     cells_Omega_i = subdomains.indices[subdomains.values == i]
@@ -218,7 +215,7 @@ for i in TAGS:
     else:
         sigma = sigma_i # intra-cellular         
 
-    v_i = v_dict[i]
+    v_i = v_dict[i] 
     
     for j in TAGS:
         
@@ -267,6 +264,7 @@ assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly ti
 matrix_assemble_time = assemble_time
 
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
+
 
 # Save A
 # dump(A, 'output/A_robin.mat')
@@ -323,7 +321,7 @@ if params['pc_type'] == "hypre":
     opts.setValue("pc_hypre_boomeramg_relax_type_all", "l1scaled-SOR/Jacobi")
     if mesh.geometry.dim == 3:
         opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.7)
-
+opts.setValue("ksp_norm_type", "unpreconditioned")
 ksp.setFromOptions()
 
 # intial time
@@ -361,6 +359,8 @@ ksp_iterations = []
 I_ion = dict()
 
 if comm.rank == 0: print("\n#-----------SOLVE----------#")    
+
+failed = False
 
 for time_step in range(params["time_steps"]):
 
@@ -402,7 +402,6 @@ for time_step in range(params["time_steps"]):
                 else:
                     ij_tuple = (j,i)
                     L_coeff  = -1                    
-                if ij_tuple != (0,1): L_coeff = 1e-16    
                 with fg_dict[ij_tuple].x.petsc_vec.localForm() as fg_local, vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
 
                     fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
@@ -455,6 +454,10 @@ for time_step in range(params["time_steps"]):
     ksp.solve(b, sol_vec)
     # store iterisons 
     ksp_iterations.append(ksp.getIterationNumber())
+    if ksp.getConvergedReason() < 0:
+        print("failed for ", ksp.getConvergedReason())
+        failed = True
+        break
     if not cuda:
         # Update ghost values
         sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
@@ -512,6 +515,8 @@ total_time = max_local_assemble_time + max_local_solve_time + max_local_ODE_time
 
 # Print stuff
 if comm.rank == 0: 
+    num_dofs = b.getSize()
+    avg_ksp_its = sum(ksp_iterations)/len(ksp_iterations)
     print("\n\n#-----------INFO-----------#")
     print("MPI size     =", comm.size)        
     print("N_TAGS       =", N_TAGS   )
@@ -521,8 +526,10 @@ if comm.rank == 0:
     print("P (FE order) =", params["P"])
     print("ksp_type     =", params["ksp_type"])
     print("pc_type      =", params["pc_type"] )
-    print("Global #DoFs =", b.getSize())
-    print("Average KSP iterations =", sum(ksp_iterations)/len(ksp_iterations))
+    print("Global #DoFs =", num_dofs)
+    print("Average KSP iterations =", avg_ksp_its)
+    if failed:
+        print("LINEAR SOLVER FAILED!!!")
     
     if isinstance(params["ionic_model"], dict):
         print("Ionic models:")
@@ -559,6 +566,9 @@ if params["save_performance"] and comm.rank == 0:
         "solve": max_local_solve_time,
         "ionic": max_local_ODE_time,
         "total": total_time,
+        "num_dofs": num_dofs,
+        "avg_ksp_its": avg_ksp_its,
+        "failed": failed
     }
     with open(params["out_name"]+f"-stats-{'cuda' if cuda else 'cpu'}-{comm.size}.json", "w") as fp:
         json.dump({"input": params, "performance": stats}, fp)

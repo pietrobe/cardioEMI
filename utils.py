@@ -65,7 +65,8 @@ def read_input_file(input_yml_file):
                 'sigma_e': 1.0, 'R_g': 1.0, 'fem_order': 1,
                 'mesh_conversion_factor': 1.0,
                 'pc_type': 'hypre', 'ksp_type': 'cg', 'ksp_rtol': 1e-8,
-                'save_output': False, 'save_interval': 1, 'verbose': False
+                'save_output': False, 'save_interval': 1, 'verbose': False,
+                'save_performance': False
         } 
 
         input_parameters.update(config)
