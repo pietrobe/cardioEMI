@@ -4,7 +4,8 @@ import pickle
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 import dolfinx  as dfx
-import matplotlib.pyplot as plt
+import numpy as np
+#import matplotlib.pyplot as plt
 from ufl      import inner, grad
 from sys      import argv, stdout
 from mpi4py   import MPI
@@ -45,9 +46,6 @@ params = read_input_file(argv[1])
 mesh_file = params["mesh_file"]
 ECS_TAG   = params["ECS_TAG"]
 dt        = params["dt"]
-
-# get expression of initial mmebrane potential
-v_init = Read_input_field(params['v_init'])
 
 #-----------------------#
 #          MESH         #
@@ -134,6 +132,13 @@ for i in TAGS:
             # Membrane potential and forcing term function
             vij_dict[(i,j)] = dfx.fem.Function(V)
             fg_dict[(i,j)]  = dfx.fem.Function(V)
+
+# get expression of initial membrane potential
+v_init_expr = read_input_field(params['v_init'], V=V)
+
+# turn expression into a Function with actual DOF values
+v_init = dfx.fem.Function(V)
+v_init.interpolate(v_init_expr)
         
 # init vij using initial membrane potential
 for i in TAGS:
@@ -384,13 +389,40 @@ if params["save_output"]:
         out_tags.write_meshtags(boundaries, mesh.geometry)        
         out_tags.close()
 
+
+#---------------------------------#
+#        STIMULUS SETUP           #
+#---------------------------------#
+
+# user parameters
+stim_expr  = params.get("I_stim", "100.0 * (x[0] < 0.03)")
+stim_start = params.get("stim_start", 0.0)  # ms
+stim_end   = params.get("stim_end", 1.0)    # ms
+
+# Build a stimulus Function per tag/space (so spaces match v_i and uh_dict[i])
+stim_fun = {}
+for i in TAGS:
+    Vi = V_dict[i]
+    coords = Vi.tabulate_dof_coordinates().reshape((-1, mesh.geometry.dim))
+    xlist = [coords[:, 0], coords[:, 1], coords[:, 2]]
+    vals  = eval(stim_expr, {"x": xlist, "np": np})
+    f = dfx.fem.Function(Vi)
+    f.x.array[:] = np.asarray(vals, dtype=float)
+    stim_fun[i] = f
+
+# Time-dependent amplitude as a Constant (UFL-safe)
+stim_amp = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))
+
+ksp_iterations = []
+I_ion = {}
+
 #---------------------------------#
 #        SOLUTION TIMELOOP        #
 #---------------------------------#
 
 # init auxiliary data structures
 ksp_iterations = []
-I_ion = dict()
+#I_ion = dict()
 
 if comm.rank == 0: print("\n#-----------SOLVE----------#")
 
@@ -398,11 +430,17 @@ for time_step in range(params["time_steps"]):
 
     if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')
 
+    # physical time at current step (before advancing)
+    t_n = float(time_step) * float(dt)
+
+    # update stimulus amplitude based on current time
+    if (stim_start <= t_n) and (t_n < stim_end):
+        stim_amp.value = 1.0
+    else:
+        stim_amp.value = 0.0
+
     # init data structure for linear form
     L_list = []
-
-    # Increment time
-    t += float(dt)
 
     # Update and assemble vector that is the RHS of the linear system
     t1 = time.perf_counter() # Timestamp for assembly time-lapse      
@@ -440,8 +478,16 @@ for time_step in range(params["time_steps"]):
                     fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
 
                 L_i += L_coeff * inner(fg_dict[ij_tuple], v_i('+')) * dS(membrane_ij)
+
+                # external stimulus (time-switched by Constant)
+                if ECS_TAG in (i, j):
+                    L_i += L_coeff * tau * stim_amp * inner(stim_fun[i], v_i('+')) * dS(membrane_ij)
+
                                 
         L_list.append(L_i)
+
+    # Increment time
+    t += float(dt)
 
     t_test = time.perf_counter()
     
@@ -565,3 +611,4 @@ if params["save_output"]:
     if comm.rank == 0: 
         print("\nSolution saved in output folder")    
         print(f"Total script time (with output): {time.perf_counter() - start_time:.3f} seconds\n")
+

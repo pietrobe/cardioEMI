@@ -5,13 +5,14 @@ import scipy.sparse as sparse
 import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import sys
 import ufl
 import os
 import yaml
 import pickle 
-
+from dolfinx.fem import Expression
+from dolfinx.fem import FunctionSpace
 
 # Assign intial membrane potential
 class Read_input_field:
@@ -30,25 +31,23 @@ class Read_input_field:
 
 
 # Create input field based on type and value
-def read_input_field(expression: Union[str, float, int], mesh=None):
-
-    if isinstance(expression, (int, float)):
-        return float(expression)    
-
-    elif isinstance(expression, str):
-        # Create a context for eval, including necessary objects
-        context = {"np": np, "ufl": ufl}
-        
-        # If mesh is provided, add x as the spatial coordinate
-        if mesh is not None:
-            x = ufl.SpatialCoordinate(mesh)
-            context["x"] = x
-
-        # Now, evaluate the expression in this context
-        return eval(expression, context)
+def read_input_field(expr: Union[str, float, int], V: FunctionSpace = None, mesh=None):
     
-    else:
-        raise ValueError("Expression must be a string, int, or float.")
+    if isinstance(expr, (float, int)):
+        if V is None:
+            return float(expr)
+        return Expression(ufl.as_ufl(expr), V.element.interpolation_points(), MPI.COMM_WORLD)
+
+    elif isinstance(expr, str):
+        # resolve mesh
+        m = V.mesh if V else mesh
+        if m is None:
+            raise ValueError("Need FunctionSpace or mesh to evaluate symbolic expression.")
+        x = ufl.SpatialCoordinate(m)
+        ufl_expr = eval(expr, {"ufl": ufl, "x": x, "np": np})
+        return Expression(ufl_expr, V.element.interpolation_points(), MPI.COMM_WORLD) if V else ufl_expr
+
+    raise TypeError(f"Unsupported expression type: {type(expr)}")
 
 
 def parse_nonneg_int(s):
@@ -166,6 +165,22 @@ def read_input_file(input_yml_file):
         else:
             raise KeyError(f"Set v_init in input file!")
 
+        # stimulus parameters
+        if 'I_stim' in config:
+            input_parameters['I_stim'] = config['I_stim']
+        else:
+            input_parameters['I_stim'] = "100.0 * (x[0] < 0.03)"
+
+        if 'stim_start' in config:
+            input_parameters['stim_start'] = config['stim_start']
+        else:
+            input_parameters['stim_start'] = 0.0
+
+        if 'stim_end' in config:
+            input_parameters['stim_end'] = config['stim_end']
+        else:
+            input_parameters['stim_end'] = 1.0
+
         # boundary conditions (default = 0 -> zero Neumann)
         if 'Dirichlet_points' in config: 
             input_parameters['Dirichlet_points'] = config['Dirichlet_points']
@@ -258,24 +273,6 @@ def dump(thing, path):
     assert np.all(np.isfinite(m.data))
     return np.save(path, np.c_[m.row, m.col, m.data]), sio.savemat(path, {name: m})
 
-def save_petsc_matrix_to_matlab(A, filename="A.mat", varname="A"):
-    """
-    Convert a PETSc matrix A to SciPy CSR and save it in MATLAB .mat format.
-    
-    Parameters:
-        A        : PETSc.Mat (assembled matrix)
-        filename : str, output .mat file
-        varname  : str, variable name in MATLAB
-    """
-    # Convert PETSc matrix to CSR format
-    ai, aj, av = A.getValuesCSR()
-    rows, cols = A.getSize()
-    csr = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
-
-    # Save as MATLAB .mat file
-    sio.savemat(filename, {varname: csr})
-
-
 
 def common_elements(set1, set2):    
     return set1.intersection(set2)
@@ -291,17 +288,3 @@ def plot_sparsity_pattern(A):
     plt.ylabel("Row Index")
     plt.show()
 
-
-def save_sparsity_pattern(A, filename="sparsity.png"):
-    ai, aj, av = A.getValuesCSR()
-    rows, cols = A.getSize()
-    sparse_matrix = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
-
-    plt.figure(figsize=(8, 8))
-    plt.spy(sparse_matrix, markersize=1)
-    plt.title("Sparsity Pattern of the Matrix")
-    plt.xlabel("Column Index")
-    plt.ylabel("Row Index")
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    plt.close()  # prevent display in some backends
