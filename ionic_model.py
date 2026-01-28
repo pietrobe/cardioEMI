@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from utils import *
 import dolfinx  as dfx
 import numpy as np

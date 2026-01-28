@@ -1,8 +1,11 @@
 import ufl
 import time
-import pickle 
-import multiphenicsx.fem
-import multiphenicsx.fem.petsc 
+import pickle
+try:
+    import multiphenicsx.fem
+    import multiphenicsx.fem.petsc
+except ImportError:
+    print("Missing multiphenicsx! Code will only run with CUDA enabled.")
 import dolfinx  as dfx
 import json
 from ufl      import inner, grad
@@ -73,7 +76,6 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     # Read mesh and cell tags
     mesh       = xdmf.read_mesh(ghost_mode=dfx.mesh.GhostMode.shared_facet)
     subdomains = xdmf.read_meshtags(mesh, name="cell_tags")    
-
     # Create facet-to-cell connectivity
     mesh.topology.create_connectivity(mesh.topology.dim-1, mesh.topology.dim)
 
@@ -81,7 +83,6 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim)
 
     boundaries = xdmf.read_meshtags(mesh, name="facet_tags")
-
     if cuda and comm.size > 1:
         mesh = cufem.ghost_layer_mesh(mesh)
         subdomains = cufem.ghost_layer_meshtags(subdomains, mesh)
@@ -170,12 +171,13 @@ for i in TAGS:
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
     tot_dofs += len(dofs_Vi_Omega_i)
     # Define the restrictions of the subdomains
-    restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
     if cuda:
         restriction_dof_list.append(dofs_Vi_Omega_i)
         local_size = int(sum(dofs_Vi_Omega_i<V_i.dofmap.index_map.size_local))
         restriction_local_sizes.append(local_size)
-    restriction.append(restriction_Vi_Omega_i)
+    else:
+        restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
+        restriction.append(restriction_Vi_Omega_i)
 #if comm.rank == 0: print("Sum of dofs across tags", tot_dofs, " total ", V.dofmap.index_map.size_global)
 # timers
 if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
@@ -235,10 +237,11 @@ for i in TAGS:
         a_i.append(a_ij)   
 
     a.append(a_i)
-
 if cuda:
     asm = cufem.CUDAAssembler()
+    if comm.rank == 0: print("Making forms.")
     cuda_a = cufem.form(a, restriction=(restriction_dof_list, restriction_dof_list))
+    if comm.rank == 0: print("calling create matrix block.")
     cuda_A = asm.create_matrix_block(cuda_a)
 else:
     # Converte form to dolfinx form
@@ -286,7 +289,7 @@ A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
 # Set the nullspace
 if params["ksp_type"] == "cg":
     A.setNullSpace(nullspace)
-    A.setNearNullSpace(nullspace)
+    #A.setNearNullSpace(nullspace)
 else: # direct solver
     A.setNullSpace(nullspace)
 
@@ -319,9 +322,14 @@ if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":
 
 if params['pc_type'] == "hypre":
     opts.setValue("pc_hypre_boomeramg_relax_type_all", "l1scaled-SOR/Jacobi")
+    opts.setValue("pc_hypre_boomeramg_agg_nl", 1)
     if mesh.geometry.dim == 3:
-        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.7)
+        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.25)
 opts.setValue("ksp_norm_type", "unpreconditioned")
+if "petsc_opts" in params:
+    for k,v in params["petsc_opts"].items():
+        if comm.rank == 0: print(f"Setting solver option '{k}' to '{v}'")
+        opts.setValue(k,v)
 ksp.setFromOptions()
 
 # intial time

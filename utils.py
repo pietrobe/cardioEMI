@@ -5,7 +5,7 @@ from petsc4py import PETSc
 #import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import sys
 import ufl
 import os
@@ -66,7 +66,7 @@ def read_input_file(input_yml_file):
                 'mesh_conversion_factor': 1.0,
                 'pc_type': 'hypre', 'ksp_type': 'cg', 'ksp_rtol': 1e-8,
                 'save_output': False, 'save_interval': 1, 'verbose': False,
-                'save_performance': False
+                'save_performance': False, 'petsc_opts': {}
         } 
 
         input_parameters.update(config)
