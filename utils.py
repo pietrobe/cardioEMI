@@ -5,13 +5,14 @@ from petsc4py import PETSc
 #import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import sys
 import ufl
 import os
 import yaml
 import pickle 
-
+from dolfinx.fem import Expression
+from dolfinx.fem import FunctionSpace
 
 # Assign intial membrane potential
 class Read_input_field:
@@ -30,25 +31,36 @@ class Read_input_field:
 
 
 # Create input field based on type and value
-def read_input_field(expression: Union[str, float, int], mesh=None):
-
-    if isinstance(expression, (int, float)):
-        return float(expression)    
-
-    elif isinstance(expression, str):
-        # Create a context for eval, including necessary objects
-        context = {"np": np, "ufl": ufl}
-        
-        # If mesh is provided, add x as the spatial coordinate
-        if mesh is not None:
-            x = ufl.SpatialCoordinate(mesh)
-            context["x"] = x
-
-        # Now, evaluate the expression in this context
-        return eval(expression, context)
+def read_input_field(expr: Union[str, float, int], V: FunctionSpace = None, mesh=None):
     
-    else:
-        raise ValueError("Expression must be a string, int, or float.")
+    if isinstance(expr, (float, int)):
+        if V is None:
+            return float(expr)
+        return Expression(ufl.as_ufl(expr), V.element.interpolation_points(), MPI.COMM_WORLD)
+
+    elif isinstance(expr, str):
+        # resolve mesh
+        m = V.mesh if V else mesh
+        if m is None:
+            raise ValueError("Need FunctionSpace or mesh to evaluate symbolic expression.")
+        x = ufl.SpatialCoordinate(m)
+        ufl_expr = eval(expr, {"ufl": ufl, "x": x, "np": np})
+        return Expression(ufl_expr, V.element.interpolation_points(), MPI.COMM_WORLD) if V else ufl_expr
+
+    raise TypeError(f"Unsupported expression type: {type(expr)}")
+
+
+def parse_nonneg_int(s):
+    try:
+        i = int(s)
+    except ValueError:
+        raise ValueError(f"Invalid input “{s}”: not an integer.")
+    if i < 0:
+        raise ValueError(f"Invalid input “{s}”: must be ≥ 0.")
+
+    if i != s:
+        raise ValueError(f"Invalid input “{s}”: must be integer")
+    
 
 # read yml file
 def read_input_file(input_yml_file):
@@ -66,14 +78,16 @@ def read_input_file(input_yml_file):
                 'mesh_conversion_factor': 1.0,
                 'pc_type': 'hypre', 'ksp_type': 'cg', 'ksp_rtol': 1e-8,
                 'save_output': False, 'save_interval': 1, 'verbose': False,
-                'save_performance': False, 'petsc_opts': {}
+                'save_performance': False, 'petsc_opts': {},
+                'I_stim': "100.0 * (x[0] < 0.03)", 'stim_start': 0.0,
+                'stim_end': 1.0, "Dirichlet_points": 0
         } 
 
         input_parameters.update(config)
         input_parameters['P'] = input_parameters['fem_order']
 
         fnames = ['mesh_file', 'tags_dictionary_file']
-        required_parameters = ['dt', 'out_name'] + fnames
+        required_parameters = ['dt', 'out_name', 'v_init'] + fnames
         for param in required_parameters:
             if param not in config:
                 raise ValueError(f"Missing required field '{param}'")
@@ -103,6 +117,9 @@ def read_input_file(input_yml_file):
         else:
             raise SyntaxError(f'INPUT ERROR: provide final time T or time_steps in input .yml file.')
             
+        if 'ELECTRODE_TAG' in config and 'sigma_electrode' not in config: 
+            print(f"WARNING: ELECTRODE_TAG with no sigma_electrode in input file!")            
+
         # ionic model 
         if 'ionic_model' in config: 
             input_parameters['ionic_model'] = config['ionic_model']
@@ -115,6 +132,11 @@ def read_input_file(input_yml_file):
             print('WARNING: setting default passive ionic model')
             input_parameters['ionic_model'] = "Passive"        
             
+        # sanity checks
+        parse_nonneg_int(input_parameters['P'])
+        parse_nonneg_int(input_parameters['time_steps'])
+        parse_nonneg_int(input_parameters['Dirichlet_points'])
+                
         return input_parameters
      
 
@@ -156,3 +178,4 @@ def plot_sparsity_pattern(A):
     plt.xlabel("Column Index")
     plt.ylabel("Row Index")
     plt.show()
+

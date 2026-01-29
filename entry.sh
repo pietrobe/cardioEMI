@@ -1,75 +1,72 @@
 #!/bin/bash
 
-# Define the container file
-CONTAINER="dolfinx_v0.7.1.sif"
+LOGFILE="sim.log"
 
-# Check if the container exists
-if [ ! -f "$CONTAINER" ]; then
-    echo "Error: Container $CONTAINER not found!"
-    exit 1
+# 1. Start Colima if not running
+if ! colima status | grep -q "Running"; then
+  echo "Starting Colima..." | tee "$LOGFILE"
+  colima start >> "$LOGFILE" 2>&1
 fi
 
-# Check if the correct number of arguments is provided
-if [ "$#" -lt 2 ]; then
-    echo "Usage: $0 <num_processes> <input_file> [--param value] ..."
-    exit 1
+# 2. Parse --mesh argument
+if [[ "$1" != "--mesh" || -z "$2" ]]; then
+  echo "Usage: $0 --mesh <mesh_basename>" | tee -a "$LOGFILE"
+  exit 1
 fi
 
-# Read command-line arguments
-N="$1"         # Number of processes
-INPUT_FILE="$2" # Input file
-shift 2  # Shift past the first two arguments
+MESH_NAME="$2"
+OUT_NAME="$MESH_NAME"
+MESH_FILE="data/$MESH_NAME.xdmf"
+TAGS_FILE="data/$MESH_NAME.pickle"
 
-# Create a temporary YAML file based on input.yml
-TMP_FILE=$(mktemp --suffix=.yml)
+# 3. Create input-tmp.yml in current directory
+INPUT_FILE="input.yml"
+TMP_FILE="input-tmp.yml"
 cp "$INPUT_FILE" "$TMP_FILE"
 
-# Extract default out_name from input file
-OUT_NAME=$(grep '^out_name' "$INPUT_FILE" | awk -F ': ' '{print $2}' | tr -d '"')
-
-# Process the dynamic parameters
-MODIFIED=false
-while [[ "$#" -gt 0 ]]; do
-    case "$1" in
-        --*)
-            PARAM_NAME="${1#--}"  # Remove leading --
-            PARAM_VALUE="$2"
-            sed -i "s|^$PARAM_NAME\s*: .*|$PARAM_NAME: $PARAM_VALUE|" "$TMP_FILE"
-            shift 2
-            MODIFIED=true
-            
-            # Update OUT_NAME if it's being changed
-            if [ "$PARAM_NAME" == "out_name" ]; then
-                OUT_NAME="$PARAM_VALUE"
-            fi
-            ;;
-        *)
-            echo "Invalid argument: $1"
-            exit 1
-            ;;
-    esac
-done
-
-# Ensure output directory exists
-mkdir -p output
-
-# Save the modified input file only if parameters were changed
-if [ "$MODIFIED" = true ]; then
-    FINAL_INPUT_FILE="output/input-${OUT_NAME}.yml"
-    cp "$TMP_FILE" "$FINAL_INPUT_FILE"
+# 4. Override values in input-tmp.yml
+# -- mesh_file
+if grep -q "^[[:space:]]*mesh_file[[:space:]]*:" "$TMP_FILE"; then
+  sed -i '' "s|^[[:space:]]*mesh_file[[:space:]]*:.*|mesh_file: \"$MESH_FILE\"|" "$TMP_FILE"
 else
-    FINAL_INPUT_FILE="$TMP_FILE"
+  echo "mesh_file: \"$MESH_FILE\"" >> "$TMP_FILE"
 fi
 
-# Define the required bind mounts
-BIND_VIM="--bind /usr/bin/vim:/usr/bin/vim"
-BIND_LIBGPM="--bind /home/kit/ibt/au0395/.local/share/enroot/pyxis_kaskade7/usr/lib/x86_64-linux-gnu/libgpm.so.2:/usr/lib/x86_64-linux-gnu/libgpm.so.2"
+# -- tags_dictionary_file
+if grep -q "^[[:space:]]*tags_dictionary_file[[:space:]]*:" "$TMP_FILE"; then
+  sed -i '' "s|^[[:space:]]*tags_dictionary_file[[:space:]]*:.*|tags_dictionary_file: \"$TAGS_FILE\"|" "$TMP_FILE"
+else
+  echo "tags_dictionary_file: \"$TAGS_FILE\"" >> "$TMP_FILE"
+fi
 
-# Run the container, install multiphenicsx silently, and execute the simulation
-apptainer exec $BIND_VIM $BIND_LIBGPM "$CONTAINER" bash -c "
-    pip install -q multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1 > /dev/null 2>&1
-    mpirun -n $N python3 -u main.py $FINAL_INPUT_FILE
-"
+# -- out_name
+if grep -q "^[[:space:]]*out_name[[:space:]]*:" "$TMP_FILE"; then
+  sed -i '' "s|^[[:space:]]*out_name[[:space:]]*:.*|out_name: \"$OUT_NAME\"|" "$TMP_FILE"
+else
+  echo "out_name: \"$OUT_NAME\"" >> "$TMP_FILE"
+fi
 
-# Clean up temporary file
+# 5. Set output dir and copy input-tmp.yml
+OUTPUT_DIR="$OUT_NAME"
+mkdir -p "output/$OUTPUT_DIR"
+cp "$TMP_FILE" "output/$OUTPUT_DIR/input.yml"
+
+# 6. Run simulation
+echo "Running simulation using: $TMP_FILE" | tee -a "$LOGFILE"
+
+docker run -t -v "$(pwd)":/home/fenics -i ghcr.io/fenics/dolfinx/dolfinx:v0.9.0 \
+  bash -c "
+    cd /home/fenics && \
+    pip install --no-build-isolation -r requirements.txt && \
+    mpirun -n 5 python3 -u main.py input-tmp.yml
+  " >> "$LOGFILE" 2>&1
+
+# 7. Copy to external drive
+DEST="/Volumes/IBT/cardioEMI-resolution/$OUT_NAME"
+mkdir -p "$DEST"
+cp -r "output/$OUTPUT_DIR"/* "$TMP_FILE" "$DEST/"
+echo "Copied results to $DEST" | tee -a "$LOGFILE"
+
+# 8. Cleanup
 rm "$TMP_FILE"
+rm -rf "output/$OUTPUT_DIR"

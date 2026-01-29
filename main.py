@@ -8,6 +8,7 @@ except ImportError:
     print("Missing multiphenicsx! Code will only run with CUDA enabled.")
 import dolfinx  as dfx
 import json
+import numpy as np
 from ufl      import inner, grad
 from sys      import argv, stdout
 from mpi4py   import MPI
@@ -35,13 +36,13 @@ ODEs_time     = 0
 start_time = time.perf_counter()
 
 # MPI communicator
-comm = MPI.COMM_WORLD 
+comm = MPI.COMM_WORLD
 
-if comm.rank == 0: 
+if comm.rank == 0:
     print("\n#-----------SETUP----------#")
-    print("Processing input file:", argv[1])      
+    print("Processing input file:", argv[1])
 
-# Read input file 
+# Read input file
 params = read_input_file(argv[1])
 
 # aliases
@@ -53,14 +54,11 @@ cuda = params["cuda"]
 if cuda:
     import cudolfinx as cufem
 
-# get expression of initial mmebrane potential
-v_init = Read_input_field(params['v_init'])
-
 #-----------------------#
 #          MESH         #
 #-----------------------#
 
-if comm.rank == 0: print("Input mesh file:", mesh_file)       
+if comm.rank == 0: print("Input mesh file:", mesh_file)
 
 with open(params["tags_dictionary_file"], "rb") as f:
     membrane_tags = pickle.load(f)
@@ -107,13 +105,17 @@ sigma_i = read_input_field(params['sigma_i'], mesh=mesh)
 sigma_e = read_input_field(params['sigma_e'], mesh=mesh)
 tau     = dt/params["C_M"]
 
+# add electrode conductivity if present
+using_electrode = ("sigma_electrode" in params)
+
+if using_electrode:    
+    sigma_electrode = read_input_field(params['sigma_electrode'], mesh=mesh)
+    ELECTRODE_TAG   = params["ELECTRODE_TAG"]
+
 #------------------------------------------#
 #     FUNCTION SPACES AND RESTRICTIONS     #
 #------------------------------------------#
 V = dfx.fem.functionspace(mesh, ("Lagrange", params["P"])) # Space for functions defined on the entire mesh
-
-# vector for space, one for each tag
-V_dict = dict()
 
 # trial and test functions
 u_dict = dict()
@@ -138,22 +140,29 @@ for i in TAGS:
     for j in TAGS:
         if i < j:
             # Membrane potential and forcing term function
-            vij_dict[(i,j)] = dfx.fem.Function(V) 
+            vij_dict[(i,j)] = dfx.fem.Function(V)
             fg_dict[(i,j)]  = dfx.fem.Function(V)
+
+# get expression of initial membrane potential
+v_init_expr = read_input_field(params['v_init'], V=V)
+
+# turn expression into a Function with actual DOF values
+v_init = dfx.fem.Function(V)
+v_init.interpolate(v_init_expr)
         
-# init vij using initial membrane potential        
-for i in TAGS:    
+# init vij using initial membrane potential
+for i in TAGS:
 
     # interpolate v_init in intra_extra, intra_intra is 0 by default
-    if i < ECS_TAG:    
-        vij_dict[(i,ECS_TAG)].interpolate(v_init)    
-        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:] 
+    if i < ECS_TAG:
+        vij_dict[(i,ECS_TAG)].interpolate(v_init)
+        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:]
 
     elif i > ECS_TAG:
-        vij_dict[(ECS_TAG,i)].interpolate(v_init)    
-    
+        vij_dict[(ECS_TAG,i)].interpolate(v_init)
+
 # save membrane potential for visualization (valid only for extra-intra)
-v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:] 
+v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:]
 
 ##### Restrictions #####
 restriction = []
@@ -166,10 +175,15 @@ for i in TAGS:
 
     # Get indices of the cells of the intra- and extracellular subdomains
     cells_Omega_i = subdomains.indices[subdomains.values == i]
-    
+
+    if i == ECS_TAG and using_electrode:        
+        cells_Omega_electrode = subdomains.indices[subdomains.values == ELECTRODE_TAG]      
+        cells_Omega_i = np.concatenate([cells_Omega_i, cells_Omega_electrode])                          
+
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
     tot_dofs += len(dofs_Vi_Omega_i)
+
     # Define the restrictions of the subdomains
     if cuda:
         restriction_dof_list.append(dofs_Vi_Omega_i)
@@ -187,15 +201,65 @@ setup_time = t1 - start_time
 # set ionic models
 ionic_models = dict()
 
-for i in TAGS:        
+for i in TAGS:
     for j in TAGS:
 
-        if i < j:        
+        if i < j:
             if i == ECS_TAG or j == ECS_TAG:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True, V=V)
+
 if comm.rank == 0: print(f"making ionic models: {time.perf_counter() - t1:.2f} seconds")        
+
+####### BC #######
+number_of_Dirichlet_points = params['Dirichlet_points']
+Dirichletbc = (number_of_Dirichlet_points > 0) 
+
+bcs = []
+
+if Dirichletbc:
+
+    # Apply zero Dirichlet condition
+    zero = dfx.fem.Constant(mesh, 0.0)        
+
+    # identify local boundary DOFs + coords
+    boundary_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
+    local_bdofs = dfx.fem.locate_dofs_topological(V, mesh.topology.dim-1, boundary_facets)
+    coords = V.tabulate_dof_coordinates()
+    local_coords = coords[local_bdofs]      # shape (n_loc, gdim)
+
+    # local to global
+    imap = V.dofmap.index_map
+    first_global = imap.local_range[0]       # first global index on this rank
+    local_global_bdofs = first_global + local_bdofs
+
+    # gather everyone’s cands to rank 0
+    all_globals = comm.gather(local_global_bdofs, root=0)
+    all_coords  = comm.gather(local_coords,      root=0)
+
+    # on rank 0 pick the 10 “corner‐nearest” by taxi‐distance
+    if comm.rank == 0:
+        G  = np.concatenate(all_globals)
+        C  = np.vstack(all_coords)
+        scores = C.sum(axis=1)
+        chosen_global = G[np.argsort(scores)[:number_of_Dirichlet_points]]
+    else:
+        chosen_global = None
+
+    # broadcast the final 10 GLOBAL DOFs to everyone
+    chosen_global = comm.bcast(chosen_global, root=0)
+
+    # each rank picks from its local globals, maps back to local indices
+    mask = np.isin(local_global_bdofs, chosen_global)
+    local_chosen = local_bdofs[mask].astype(np.int32)
+
+    # impose BCs only on these local_chosen
+    for i in TAGS:
+        bc_i = dfx.fem.dirichletbc(zero, local_chosen, V)
+        bcs.append(bc_i)
+
+##############
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
@@ -208,14 +272,14 @@ for i in TAGS:
 
     a_i = []
 
-    # membranes tags for cell tag i 
+    # membranes tags for cell tag i
     membrane_i = membrane_tags[i]
 
     if i == ECS_TAG:
-        sigma = sigma_e # extra-cellular 
+        sigma = sigma_e # extra-cellular
 
     else:
-        sigma = sigma_i # intra-cellular         
+        sigma = sigma_i # intra-cellular
 
     v_i = v_dict[i] 
     
@@ -225,12 +289,17 @@ for i in TAGS:
 
         membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))   
         # if cells i and j have a membrane in common
-        if len(membrane_ij) > 0:                 
+        if len(membrane_ij) > 0:
 
-            if i == j:                                
-                a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)
-            else:
-                a_ij = - inner(u_j('+'), v_i('-')) * dS(membrane_ij)            
+            if i == j:                                                      
+                
+                a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)   
+
+                if i == ECS_TAG and using_electrode:
+                    a_ij +=  tau * inner(sigma_electrode * grad(u_j), grad(v_i)) * dx(ELECTRODE_TAG)                       
+
+            else:                                
+                a_ij = - inner(u_j('+'), v_i('-')) * dS(membrane_ij)                                      
         else:
             a_ij = None
 
@@ -261,36 +330,28 @@ if cuda:
   A = cuda_A.mat
 else:
   # Assemble the block linear system matrix
-  A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
+  A = multiphenicsx.fem.petsc.assemble_matrix_block(a, bcs=bcs, restriction=(restriction, restriction))
   A.assemble()
+print(f"A norm {A.norm()}")
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 matrix_assemble_time = assemble_time
 
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
 
-
-# Save A
-# dump(A, 'output/A_robin.mat')
-# Plot sparsity pattern 
-# plot_sparsity_pattern(A)
-
 #---------------------------------#
 #        CREATE NULLSPACE         #
 #---------------------------------#
 
-# Create the PETSc nullspace vector and check that it is a valid nullspace of A
-nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
-assert nullspace.test(A)
-# For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
-# sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
-# Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
-A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
-A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
-# Set the nullspace
-if params["ksp_type"] == "cg":
-    A.setNullSpace(nullspace)
-    #A.setNearNullSpace(nullspace)
-else: # direct solver
+if not Dirichletbc:
+    # Create the PETSc nullspace vector and check that it is a valid nullspace of A
+    nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
+    assert nullspace.test(A)
+    # For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
+    # sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
+    # Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
+    A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
+    A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
+    # Set the nullspace
     A.setNullSpace(nullspace)
 
 #---------------------------------#
@@ -315,8 +376,8 @@ if params["verbose"]:
     opts.setValue('ksp_view', None)
     opts.setValue('ksp_monitor_true_residual', None)
 
-# for titerastive solvers set tolerance 
-if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":    
+# for iterative solvers set tolerance
+if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":
     opts.setValue('ksp_rtol', params["ksp_rtol"])
     opts.setValue('ksp_converged_reason', None)
 
@@ -342,21 +403,49 @@ if params["save_output"]:
     for i in TAGS:        
         uh_dict[i].name  = "u_" + str(i)
     
+    out_name = params.get("out_name", "").strip().lstrip("_")
+
     # potentials xdmf
-    out_sol = dfx.io.XDMFFile(comm, "output/solution-" + params["out_name"] + ".xdmf", "w")
+    out_sol = dfx.io.XDMFFile(comm, out_name + "/solution.xdmf", "w")
     out_sol.write_mesh(mesh)            
         
     # memebrane potential xdmf
-    out_v = dfx.io.XDMFFile(comm, "output/v-" + params["out_name"] + ".xdmf" , "w")
+    out_v = dfx.io.XDMFFile(comm, out_name + "/v.xdmf" , "w")
     out_v.write_mesh(mesh)
     out_v.write_function(v, t)
 
     # save subdomain data, needed for parallel visualizaiton
-    with dfx.io.XDMFFile(comm, "output/tags-" + params["out_name"] + ".xdmf", "w") as out_tags:                
+    with dfx.io.XDMFFile(comm, out_name + "/tags.xdmf", "w") as out_tags:                     
         out_tags.write_mesh(mesh)            
         out_tags.write_meshtags(subdomains, mesh.geometry)
         out_tags.write_meshtags(boundaries, mesh.geometry)        
         out_tags.close()
+
+
+#---------------------------------#
+#        STIMULUS SETUP           #
+#---------------------------------#
+
+# user parameters
+stim_expr  = params.get("I_stim", "100.0 * (x[0] < 0.03)")
+stim_start = params.get("stim_start", 0.0)  # ms
+stim_end   = params.get("stim_end", 1.0)    # ms
+
+# Build a stimulus Function per tag/space (so spaces match v_i and uh_dict[i])
+stim_fun = {}
+coords = V.tabulate_dof_coordinates().reshape((-1, mesh.geometry.dim))
+xlist = [coords[:, 0], coords[:, 1], coords[:, 2]]
+vals  = eval(stim_expr, {"x": xlist, "np": np})
+f = dfx.fem.Function(V)
+f.x.array[:] = np.asarray(vals, dtype=float)
+for i in TAGS:
+    stim_fun[i] = f
+
+# Time-dependent amplitude as a Constant (UFL-safe)
+stim_amp = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))
+
+ksp_iterations = []
+I_ion = {}
 
 #---------------------------------#
 #        SOLUTION TIMELOOP        #
@@ -364,21 +453,27 @@ if params["save_output"]:
 
 # init auxiliary data structures
 ksp_iterations = []
-I_ion = dict()
+#I_ion = dict()
 
-if comm.rank == 0: print("\n#-----------SOLVE----------#")    
+if comm.rank == 0: print("\n#-----------SOLVE----------#")
 
 failed = False
 
 for time_step in range(params["time_steps"]):
 
-    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')        
+    if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')
+
+    # physical time at current step (before advancing)
+    t_n = float(time_step) * float(dt)
+
+    # update stimulus amplitude based on current time
+    if (stim_start <= t_n) and (t_n < stim_end):
+        stim_amp.value = 1.0
+    else:
+        stim_amp.value = 0.0
 
     # init data structure for linear form
     L_list = []
-
-    # Increment time
-    t += float(dt)
 
     # Update and assemble vector that is the RHS of the linear system
     t1 = time.perf_counter() # Timestamp for assembly time-lapse      
@@ -404,7 +499,7 @@ for time_step in range(params["time_steps"]):
 
                         t_ODE = time.perf_counter()
                         
-                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])             
+                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])          
 
                         ODEs_time += time.perf_counter() - t_ODE 
                 else:
@@ -416,8 +511,16 @@ for time_step in range(params["time_steps"]):
 
                 if time_step == 0:
                     L_i += L_coeff * inner(fg_dict[ij_tuple], v_i('+')) * dS(membrane_ij)
-        if time_step == 0:                            
+
+                    # external stimulus (time-switched by Constant)
+                    if ECS_TAG in (i, j):
+                        L_i += L_coeff * tau * stim_amp * inner(stim_fun[i], v_i('+')) * dS(membrane_ij)
+
+        if time_step == 0:                        
             L_list.append(L_i)
+
+    # Increment time
+    t += float(dt)
 
     t_test = time.perf_counter()
     
@@ -442,18 +545,12 @@ for time_step in range(params["time_steps"]):
         # Clear RHS vector to avoid accumulation and assemble RHS
         b.array[:] = 0
         b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-        multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, restriction=restriction) # Assemble RHS vector        
-    # dump(b, 'output/bvec')
-        
-    # Neumann BC
-    #if time_step == 0:
-        
-        # Create solution vector
-    #    sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)        
+        multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, bcs=bcs, restriction=restriction) # Assemble RHS vector        
 
-    # if the timestep is not zero, b changes anyway and the nullspace must be removed
-    nullspace.remove(b)
-    
+    if not Dirichletbc:
+        # if the timestep is not zero, b changes anyway and the nullspace must be removed
+        nullspace.remove(b)
+    print(f"b norm {b.norm()}")
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
     
@@ -469,7 +566,7 @@ for time_step in range(params["time_steps"]):
     if not cuda:
         # Update ghost values
         sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-    
+    print(f"sol_vec norm {sol_vec.norm()}")
     # Extract sub-components of solution
     if cuda:
         offset = 0
@@ -488,7 +585,8 @@ for time_step in range(params["time_steps"]):
     for i in TAGS:
         for j in TAGS:
             if i < j:                
-                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
+                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array # TODO test other order?
+                
     
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
@@ -580,4 +678,3 @@ if params["save_performance"] and comm.rank == 0:
     }
     with open(params["out_name"]+f"-stats-{'cuda' if cuda else 'cpu'}-{comm.size}.json", "w") as fp:
         json.dump({"input": params, "performance": stats}, fp)
-
