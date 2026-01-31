@@ -253,11 +253,7 @@ if Dirichletbc:
     # each rank picks from its local globals, maps back to local indices
     mask = np.isin(local_global_bdofs, chosen_global)
     local_chosen = local_bdofs[mask].astype(np.int32)
-
-    # impose BCs only on these local_chosen
-    for i in TAGS:
-        bc_i = dfx.fem.dirichletbc(zero, local_chosen, V)
-        bcs.append(bc_i)
+    bcs.append(dfx.fem.dirichletbc(zero, local_chosen, V))
 
 ##############
 #------------------------------------#
@@ -325,7 +321,7 @@ t1 = time.perf_counter()
 # #---------------------------#
 
 if cuda:
-  asm.assemble_matrix_block(cuda_a, cuda_A)
+  asm.assemble_matrix_block(cuda_a, cuda_A,  bcs=bcs)
   cuda_A.assemble()
   A = cuda_A.mat
 else:
@@ -541,6 +537,8 @@ for time_step in range(params["time_steps"]):
         vector_assemble_setup_time = time.perf_counter() - t_test
     if cuda:
         asm.assemble_vector_block(L, cuda_b)
+        # apply lifting
+        asm.apply_lifting_block(cuda_b, cuda_a, bcs, set_bcs=True)
     else:
         # Clear RHS vector to avoid accumulation and assemble RHS
         b.array[:] = 0
