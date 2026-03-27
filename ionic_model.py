@@ -352,7 +352,7 @@ class Courtemanche_model(Ionic_model):
     # --- Ion concentrations (initial) ---
     Nai = 11.2
     Ki_init = 139.0
-    Cai_init = 1.02e-1 #1.02e-4 
+    Cai_init = 1.02e-4 #1.02e-1 
     Ca_up_init = 1.49
     Ca_rel_init = 1.49
 

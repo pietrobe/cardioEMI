@@ -243,7 +243,8 @@ if Dirichletbc:
         G  = np.concatenate(all_globals)
         C  = np.vstack(all_coords)
         scores = C.sum(axis=1)
-        chosen_global = G[np.argsort(scores)[:number_of_Dirichlet_points]]
+        chosen_global = G[np.argsort(scores)[-number_of_Dirichlet_points:]] # opposite corner
+        #chosen_global = G[np.argsort(scores)[:number_of_Dirichlet_points]]
     else:
         chosen_global = None
 
