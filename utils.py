@@ -1,11 +1,11 @@
 from mpi4py   import MPI
 from typing   import Union
 from petsc4py import PETSc
-import scipy.sparse as sparse
-import scipy.io as sio
+#import scipy.sparse as sparse
+#import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import sys
 import ufl
 import os
@@ -36,7 +36,7 @@ def read_input_field(expr: Union[str, float, int], V: FunctionSpace = None, mesh
     if isinstance(expr, (float, int)):
         if V is None:
             return float(expr)
-        return Expression(ufl.as_ufl(expr), V.element.interpolation_points(), MPI.COMM_WORLD)
+        return Expression(ufl.as_ufl(expr), V.element.interpolation_points, MPI.COMM_WORLD)
 
     elif isinstance(expr, str):
         # resolve mesh
@@ -45,7 +45,7 @@ def read_input_field(expr: Union[str, float, int], V: FunctionSpace = None, mesh
             raise ValueError("Need FunctionSpace or mesh to evaluate symbolic expression.")
         x = ufl.SpatialCoordinate(m)
         ufl_expr = eval(expr, {"ufl": ufl, "x": x, "np": np})
-        return Expression(ufl_expr, V.element.interpolation_points(), MPI.COMM_WORLD) if V else ufl_expr
+        return Expression(ufl_expr, V.element.interpolation_points, MPI.COMM_WORLD) if V else ufl_expr
 
     raise TypeError(f"Unsupported expression type: {type(expr)}")
 
@@ -72,27 +72,32 @@ def read_input_file(input_yml_file):
             except yaml.YAMLError as exc:
                 print(exc)        
             
-        input_parameters = dict()
+        input_parameters = {
+                'C_M': 1.0, 'cuda': False, 'sigma_i': 1.0,
+                'sigma_e': 1.0, 'R_g': 1.0, 'fem_order': 1,
+                'mesh_conversion_factor': 1.0,
+                'pc_type': 'hypre', 'ksp_type': 'cg', 'ksp_rtol': 1e-8,
+                'save_output': False, 'save_interval': 1, 'verbose': False,
+                'save_performance': False, 'petsc_opts': {},
+                'I_stim': "100.0 * (x[0] < 0.03)", 'stim_start': 0.0,
+                'stim_end': 1.0, "Dirichlet_points": 0
+        } 
+
+        input_parameters.update(config)
+        input_parameters['P'] = input_parameters['fem_order']
+
+        fnames = ['mesh_file', 'tags_dictionary_file']
+        required_parameters = ['dt', 'out_name', 'v_init'] + fnames
+        for param in required_parameters:
+            if param not in config:
+                raise ValueError(f"Missing required field '{param}'")
 
         ######### geometry #########
-        if 'mesh_file' in config:              
-            check_if_file_exists(config['mesh_file'])
-            input_parameters['mesh_file'] = config['mesh_file']                                        
-        else:
-            print('INPUT ERROR: provide mesh_file field in input .yml file')
-            return
-
-        if 'tags_dictionary_file' in config:      
-            check_if_file_exists(config['tags_dictionary_file'])
-            input_parameters['tags_dictionary_file'] = config['tags_dictionary_file']                                        
-        else:
-            print('INPUT ERROR: provide tags_dictionary_file field in input .yml file')
-            return
+        for fname in ['mesh_file', 'tags_dictionary_file']:
+            check_if_file_exists(config[fname])
 
         # get ECC tag if specified, otherwise use the minimum
-        if 'ECS_TAG' in config:                  
-            input_parameters['ECS_TAG'] = config['ECS_TAG']                                        
-        else:
+        if 'ECS_TAG' not in config:                  
             
             with open(config["tags_dictionary_file"], "rb") as f:
                 membrane_tags = pickle.load(f)
@@ -104,11 +109,6 @@ def read_input_file(input_yml_file):
             
                 
         ######### problem #########
-        if 'dt' in config:
-            input_parameters['dt'] = config['dt']
-        else:
-            print('INPUT ERROR: provide dt in input .yml file')
-            return
         
         if 'time_steps' in config: 
             input_parameters['time_steps'] = config['time_steps']            
@@ -117,77 +117,8 @@ def read_input_file(input_yml_file):
         else:
             raise SyntaxError(f'INPUT ERROR: provide final time T or time_steps in input .yml file.')
             
-        if 'mesh_conversion_factor' in config: 
-            input_parameters['mesh_conversion_factor'] = config['mesh_conversion_factor']
-        else:
-            input_parameters['mesh_conversion_factor'] = 1.0
-        
-        # Membrane capacitance, (dafult 1) 
-        if 'C_M' in config: 
-            input_parameters['C_M'] = config['C_M']
-        else:
-            input_parameters['C_M'] = 1.0
-
-        # conductivities 
-        if 'sigma_i' in config: 
-            input_parameters['sigma_i'] = config['sigma_i']
-        else:
-            input_parameters['sigma_i'] = 1.0
-
-        if 'sigma_e' in config: 
-            input_parameters['sigma_e'] = config['sigma_e']
-        else:
-            input_parameters['sigma_e'] = 1.0
-        
-        if 'ELECTRODE_TAG' in config: 
-            input_parameters['ELECTRODE_TAG'] = config['ELECTRODE_TAG']
-
-            if 'sigma_electrode' in config: 
-                input_parameters['sigma_electrode'] = config['sigma_electrode']                       
-            else:
-                print(f"WARNING: ELECTRODE_TAG with no sigma_electrode in input file!")            
-
-        # Resistance 
-        if 'R_g' in config: 
-            input_parameters['R_g'] = config['R_g']
-        else:
-            input_parameters['R_g'] = 1.0
-                            
-        # finite element polynomial order (dafult 1) 
-        if 'fem_order' in config: 
-            input_parameters['P'] = config['fem_order']
-        else:
-            input_parameters['P'] = 1
-        
-        # initial membrane potential (dafult 1)
-        if 'v_init' in config: 
-            input_parameters['v_init'] = config['v_init']
-        else:
-            raise KeyError(f"Set v_init in input file!")
-
-        # stimulus parameters
-        if 'I_stim' in config:
-            input_parameters['I_stim'] = config['I_stim']
-        else:
-            input_parameters['I_stim'] = "100.0 * (x[0] < 0.03)"
-
-        if 'stim_start' in config:
-            input_parameters['stim_start'] = config['stim_start']
-        else:
-            input_parameters['stim_start'] = 0.0
-
-        if 'stim_end' in config:
-            input_parameters['stim_end'] = config['stim_end']
-        else:
-            input_parameters['stim_end'] = 1.0
-
-        # boundary conditions (default = 0 -> zero Neumann)
-        if 'Dirichlet_points' in config: 
-            input_parameters['Dirichlet_points'] = config['Dirichlet_points']
-        else:
-            input_parameters['Dirichlet_points'] = 0
-
-            
+        if 'ELECTRODE_TAG' in config and 'sigma_electrode' not in config: 
+            print(f"WARNING: ELECTRODE_TAG with no sigma_electrode in input file!")            
 
         # ionic model 
         if 'ionic_model' in config: 
@@ -201,47 +132,7 @@ def read_input_file(input_yml_file):
             print('WARNING: setting default passive ionic model')
             input_parameters['ionic_model'] = "Passive"        
             
-        ############### solver parameters ###############
-
-        if 'ksp_type' in config: 
-            input_parameters['ksp_type'] = config['ksp_type']
-        else:
-            input_parameters['ksp_type'] = 'cg'        
-
-        if 'pc_type' in config: 
-            input_parameters['pc_type'] = config['pc_type']
-        else:
-            input_parameters['pc_type'] = 'hypre'        
-
-        if 'ksp_rtol' in config: 
-            input_parameters['ksp_rtol'] = config['ksp_rtol']
-        else:
-            input_parameters['ksp_rtol'] = 1e-8
-        
-        if 'save_output' in config: 
-            input_parameters['save_output'] = config['save_output']
-        else:
-            input_parameters['save_output'] = False
-
-        if 'save_interval' in config: 
-            input_parameters['save_interval'] = config['save_interval']
-        else:
-            input_parameters['save_interval'] = 1            
-        
-        if 'verbose' in config: 
-            input_parameters['verbose'] = config['verbose']
-        else:
-            input_parameters['verbose'] = False
-
-        if 'out_name' in config:
-            input_parameters['out_name'] = "_" + config['out_name']
-            print('WARNING: Paraview states only work with defult output names.')
-        else:
-            input_parameters['out_name'] = ''            
-            # raise SyntaxError(f'INPUT ERROR: provide name of output in input .yml file.')
-
-
-        # sanuty checks
+        # sanity checks
         parse_nonneg_int(input_parameters['P'])
         parse_nonneg_int(input_parameters['time_steps'])
         parse_nonneg_int(input_parameters['Dirichlet_points'])
