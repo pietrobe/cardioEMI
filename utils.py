@@ -225,7 +225,6 @@ def read_input_file(input_yml_file):
             input_parameters['out_name'] = ''            
             # raise SyntaxError(f'INPUT ERROR: provide name of output in input .yml file.')
 
-
         # sanuty checks
         parse_nonneg_int(input_parameters['P'])
         parse_nonneg_int(input_parameters['time_steps'])
@@ -259,6 +258,8 @@ def dump(thing, path):
     return np.save(path, np.c_[m.row, m.col, m.data]), sio.savemat(path, {name: m})
 
 def save_petsc_matrix_to_matlab(A, filename="A.mat", varname="A"):
+
+    print("Saving matrix into MATLAB format...")
     """
     Convert a PETSc matrix A to SciPy CSR and save it in MATLAB .mat format.
     

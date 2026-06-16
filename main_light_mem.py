@@ -58,6 +58,8 @@ if comm.rank == 0: print("Input mesh file:", mesh_file)
 with open(params["tags_dictionary_file"], "rb") as f:
     membrane_tags = pickle.load(f)
 
+print(membrane_tags)
+
 # set tags info
 TAGS   = sorted(membrane_tags.keys())
 N_TAGS = len(TAGS)
@@ -113,8 +115,6 @@ v_dict = dict()
 
 # list for storing the solutions and forcing factors
 uh_dict  = dict()
-vij_dict = dict()
-fg_dict  = dict()
 
 # to store membrane potential
 v = dfx.fem.Function(V)
@@ -129,26 +129,13 @@ for i in TAGS:
     v_dict[i]  =  ufl.TestFunction(V_i)
     uh_dict[i] =  dfx.fem.Function(V_i)
     
-    # v_ij con i < j to avoid repetions
-    for j in TAGS:
-        if i < j:
-            # Membrane potential and forcing term function
-            vij_dict[(i,j)] = dfx.fem.Function(V) 
-            fg_dict[(i,j)]  = dfx.fem.Function(V)
-        
-# init vij using initial membrane potential        
-for i in TAGS:    
 
-    # interpolate v_init in intra_extra, intra_intra is 0 by default
-    if i < ECS_TAG:    
-        vij_dict[(i,ECS_TAG)].interpolate(v_init)    
-        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:] 
-
-    elif i > ECS_TAG:
-        vij_dict[(ECS_TAG,i)].interpolate(v_init)    
-    
+# new membrane voltage 
+fg  = dfx.fem.Function(V)
+v.interpolate(v_init)    
+           
 # save membrane potential for visualization (valid only for extra-intra)
-v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:] 
+#v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:] 
 
 ##### Restrictions #####
 restriction = []
@@ -180,7 +167,7 @@ setup_time = t1 - start_time
 # set ionic models
 ionic_models = dict()
 
-for i in TAGS:        
+for i in TAGS:        # TODO just two calls to the factory?
     for j in TAGS:
 
         if i < j:        
@@ -437,7 +424,8 @@ for time_step in range(params["time_steps"]):
                 if i < j:
                     ij_tuple = (i,j)                                        
                     L_coeff  = 1
-                    with vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
+                    #with vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
+                    with v.x.petsc_vec.localForm() as v_local:
 
                         t_ODE = time.perf_counter()
                         
@@ -448,7 +436,7 @@ for time_step in range(params["time_steps"]):
                     ij_tuple = (j,i)
                     L_coeff  = -1                    
                     
-                with fg_dict[ij_tuple].x.petsc_vec.localForm() as fg_local, vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
+                with fg.x.petsc_vec.localForm() as fg_local, v.x.petsc_vec.localForm() as v_local:
 
                     fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
 
@@ -505,18 +493,18 @@ for time_step in range(params["time_steps"]):
             with component.x.petsc_vec.localForm() as component_local:
                 component_local[:] = ui_ue_wrapper_local
 
+    # Pass 1: intra-extra
     for i in TAGS:
         for j in TAGS:
-            if i < j:                
-                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array # TODO test other order?
-                
-    
-    # fill v for visualization
-    v.x.array[:] = uh_dict[ECS_TAG].x.array
+            if i < j and (i == ECS_TAG or j == ECS_TAG):
+                v.x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
 
+
+    # Pass 2: intra-intra
     for i in TAGS:
-        if i != ECS_TAG:
-            v.x.array[:] -= uh_dict[i].x.array
+        for j in TAGS:
+            if i < j and i != ECS_TAG and j != ECS_TAG:
+                v.x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
 
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
