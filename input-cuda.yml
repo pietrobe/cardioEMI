@@ -1,0 +1,33 @@
+mesh_file             : "data/robin-h21-25.xdmf"
+tags_dictionary_file  : "data/robin-h21-25.pickle"
+mesh_conversion_factor: 0.0001 
+fem_order: 1
+cuda: True
+# Temporal parameters 
+dt         : 0.005
+time_steps : 500 
+
+# Physical parameters 
+C_M       : 1
+sigma_i   : 5 #"ufl.conditional(x[0] < 0.5, 1.0, 0.1)"
+sigma_e   : 1
+R_g       : 0.003
+
+# Initial membrane potential
+v_init: "-80 * (x[0] > 0.0)"
+
+# Ionic model
+ionic_model: 
+  intra_intra: "Passive"
+  intra_extra: "AP"
+
+# Solver 
+ksp_type: "cg"
+pc_type : "jacobi"
+ksp_rtol: 1e-7
+
+# Output 
+save_output  : False 
+save_interval: 1
+verbose      : False
+out_name     : "sigma_e_2"
