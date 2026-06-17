@@ -182,21 +182,14 @@ for i in TAGS:
 
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
-
+    tot_dofs += len(dofs_Vi_Omega_i)
     # Define the restrictions of the subdomains
     restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
-
-    restriction.append(restriction_Vi_Omega_i)
-    tot_dofs += len(dofs_Vi_Omega_i)
-
-    # Define the restrictions of the subdomains
     if cuda:
         restriction_dof_list.append(dofs_Vi_Omega_i)
         local_size = int(sum(dofs_Vi_Omega_i<V_i.dofmap.index_map.size_local))
         restriction_local_sizes.append(local_size)
-    else:
-        restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
-        restriction.append(restriction_Vi_Omega_i)
+    restriction.append(restriction_Vi_Omega_i)
 #if comm.rank == 0: print("Sum of dofs across tags", tot_dofs, " total ", V.dofmap.index_map.size_global)
 # timers
 if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
