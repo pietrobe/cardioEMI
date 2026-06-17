@@ -324,9 +324,8 @@ if not Dirichletbc:
     A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
     # Set the nullspace
     A.setNullSpace(nullspace)
-    if params["ksp_type"] == "cg":        
+    if params["ksp_type"] == "cg":
         A.setNearNullSpace(nullspace)
-    
 #---------------------------------#
 #      CONFIGURE SOLVER           #
 #---------------------------------#
@@ -413,7 +412,7 @@ for time_step in range(params["time_steps"]):
         
         v_i = v_dict[i]
 
-        L_i = 0    
+        L_i = 0
 
         for j in TAGS:                        
             
@@ -478,7 +477,7 @@ for time_step in range(params["time_steps"]):
     t1 = time.perf_counter() # Timestamp for solver time-lapse
     ksp.solve(b, sol_vec)
 
-    # store iterisons 
+    # store iterisons
     ksp_iterations.append(ksp.getIterationNumber())
 
     # Update ghost values

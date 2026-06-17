@@ -13,8 +13,8 @@ import pickle
 N_TAGS = 4 
 
 # user input
-elements_per_side = 256 
-cells_per_side    = 32
+elements_per_side = 4096
+cells_per_side    = 128
 out_file = "../data/square_mesh_" + str(elements_per_side) + "_" + str(cells_per_side) + ".xdmf"
 out_dict = "../data/square_dict_" + str(elements_per_side) + "_" + str(cells_per_side) + ".pickle"
 
@@ -94,6 +94,66 @@ def mark_subdomains_square_many_cells(mesh: dfx.mesh.Mesh, cells_per_side: int) 
 
     return cell_tags
 
+def mark_subdomains_square_many_cells_fast(
+    mesh: dfx.mesh.Mesh,
+    cells_per_side: int
+):
+
+    # Geometry
+    XY_MIN = 0.125
+    XY_MAX = 0.875
+    EXTRA  = 0
+
+    cell_dim = mesh.topology.dim
+
+    # Ensure topology
+    mesh.topology.create_entities(cell_dim)
+
+    # Number of cells (local + ghosts)
+    imap = mesh.topology.index_map(cell_dim)
+    num_cells = imap.size_local + imap.num_ghosts
+
+    # Allocate marker
+    cell_marker = np.full(num_cells, EXTRA, dtype=np.int32)
+
+    # Cell midpoints (shape: [num_cells, gdim])
+    x = dfx.mesh.compute_midpoints(mesh, cell_dim,
+                                   np.arange(num_cells, dtype=np.int32))
+
+    # Cell size of your logical grid
+    cell_length = (XY_MAX - XY_MIN) / cells_per_side
+
+    # Mask: cells inside the inner square
+    inside = (
+        (x[:, 0] >= XY_MIN) & (x[:, 0] <= XY_MAX) &
+        (x[:, 1] >= XY_MIN) & (x[:, 1] <= XY_MAX)
+    )
+
+    # Logical indices of the block each cell belongs to
+    ix = np.floor((x[inside, 0] - XY_MIN) / cell_length).astype(int)
+    iy = np.floor((x[inside, 1] - XY_MIN) / cell_length).astype(int)
+
+    # Safety (numerical tolerance at XY_MAX)
+    ix = np.clip(ix, 0, cells_per_side - 1)
+    iy = np.clip(iy, 0, cells_per_side - 1)
+
+    # Same logic as your original tagging
+    even_row = iy % 2
+    row_index = ix
+
+    tags = 1 + (2 * even_row + row_index) % N_TAGS
+    cell_marker[np.where(inside)[0]] = tags
+
+    # Build MeshTags
+    cell_tags = dfx.mesh.meshtags(
+        mesh,
+        cell_dim,
+        np.arange(num_cells, dtype=np.int32),
+        cell_marker
+    )
+
+    return cell_tags
+
 def mark_boundaries_square_many_cells(mesh: dfx.mesh.Mesh, cells_per_side: int, subdomains: dfx.mesh.MeshTags) -> dfx.mesh.MeshTags:    
 
     DEFAULT = -5
@@ -149,6 +209,59 @@ def mark_boundaries_square_many_cells(mesh: dfx.mesh.Mesh, cells_per_side: int, 
 
     return membrane_tags_dict, facet_tags
 
+def mark_boundaries_square_many_cells_fast(
+    mesh: dfx.mesh.Mesh, 
+    cells_per_side: int, 
+    subdomains: dfx.mesh.MeshTags,
+    DEFAULT: int = -5
+):
+
+    cell_dim  = mesh.topology.dim
+    facet_dim = cell_dim - 1
+
+    # Create connectivity facet -> cell
+    mesh.topology.create_connectivity(facet_dim, cell_dim)
+    facet_to_cell = mesh.topology.connectivity(facet_dim, cell_dim)
+
+    # Number of facets
+    index_map = mesh.topology.index_map(facet_dim)
+    num_facets = index_map.size_local + index_map.num_ghosts
+
+    # Precompute cell -> tag mapping (O(Ncells))
+    num_cells = mesh.topology.index_map(cell_dim).size_local + \
+                mesh.topology.index_map(cell_dim).num_ghosts
+
+    cell_tags = np.full(num_cells, DEFAULT, dtype=np.int32)
+    cell_tags[subdomains.indices] = subdomains.values
+
+    # Output containers
+    facet_marker = np.full(num_facets, DEFAULT, dtype=np.int32)
+    membrane_tags_dict = defaultdict(set)
+
+    # Main loop (O(Nfacets))
+    for facet in range(num_facets):
+        cells = facet_to_cell.links(facet)
+        if len(cells) != 2:
+            continue
+
+        tag0 = cell_tags[cells[0]]
+        tag1 = cell_tags[cells[1]]
+
+        if tag0 != tag1:
+            membrane_tag = min(tag0, tag1) * (N_TAGS + 1) + max(tag0, tag1)
+            facet_marker[facet] = membrane_tag
+            membrane_tags_dict[tag0].add(membrane_tag)
+            membrane_tags_dict[tag1].add(membrane_tag)
+
+    facet_tags = dfx.mesh.meshtags(
+        mesh,
+        facet_dim,
+        np.arange(num_facets, dtype=np.int32),
+        facet_marker
+    )
+
+    return membrane_tags_dict, facet_tags
+
 #-----------------------#
 #          MESH         #
 #-----------------------#
@@ -168,10 +281,12 @@ def create_square(N: int, cells_per_side: int, out_file: str) -> dict:
 
     # Get subdomains and boundaries
     print("Marking cells", flush=True)
-    subdomains = mark_subdomains_square_many_cells(mesh, cells_per_side)
+    #subdomains = mark_subdomains_square_many_cells(mesh, cells_per_side)
+    subdomains = mark_subdomains_square_many_cells_fast(mesh, cells_per_side)
 
     print("Marking facets", flush=True)
-    membrane_tags_dict, boundaries  = mark_boundaries_square_many_cells(mesh, cells_per_side, subdomains)
+    #membrane_tags_dict, boundaries  = mark_boundaries_square_many_cells(mesh, cells_per_side, subdomains)
+    membrane_tags_dict, boundaries  = mark_boundaries_square_many_cells_fast(mesh, cells_per_side, subdomains)
 
     print("\nSaving mesh", flush=True)
     with dfx.io.XDMFFile(mesh.comm, out_file, "w") as mesh_file:
@@ -187,6 +302,38 @@ def create_square(N: int, cells_per_side: int, out_file: str) -> dict:
 
     return membrane_tags_dict
 
+from dolfinx import io, fem 
+
+def mesh_and_dofs_info_from_xdmf(
+    xdmf_filename: str,
+    element=("CG", 1)
+):
+    with io.XDMFFile(MPI.COMM_WORLD, xdmf_filename, "r") as xdmf:
+        mesh = xdmf.read_mesh(name="mesh")
+        mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
+
+    V = fem.functionspace(mesh, element)
+
+    cell_dim = mesh.topology.dim
+
+    info = {
+        "file": xdmf_filename,
+        "cells": mesh.topology.index_map(cell_dim).size_global,
+        "facets": mesh.topology.index_map(cell_dim - 1).size_global,
+        "vertices": mesh.topology.index_map(0).size_global,
+        "block size": V.dofmap.index_map_bs,
+        "dofs": V.dofmap.index_map.size_global * V.dofmap.index_map_bs,
+    }
+
+    # Print only on rank 0
+    if mesh.comm.rank == 0:
+        print(f"Mesh info for: {xdmf_filename}")
+        for k, v in info.items():
+            if k != "file":
+                print(f"  {k}: {v}")
+
+    return info
 
 create_square(N=elements_per_side, cells_per_side=cells_per_side, out_file=out_file)
+#mesh_and_dofs_info_from_xdmf(out_file)
 print(f"Create mesh time: {time.perf_counter()-t1:.2f}")

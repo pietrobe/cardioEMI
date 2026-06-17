@@ -10,7 +10,7 @@ import sys
 import ufl
 import os
 import yaml
-import pickle 
+import pickle
 
 
 # Assign intial membrane potential
@@ -26,19 +26,19 @@ class Read_input_field:
         elif isinstance(self.expression, str):
             return eval(self.expression, {"np": np, "ufl": ufl, "x": x})
         else:
-            raise ValueError("Expression must be a string, int, or float.")                     
+            raise ValueError("Expression must be a string, int, or float.")
 
 
 # Create input field based on type and value
 def read_input_field(expression: Union[str, float, int], mesh=None):
 
     if isinstance(expression, (int, float)):
-        return float(expression)    
+        return float(expression)
 
     elif isinstance(expression, str):
         # Create a context for eval, including necessary objects
         context = {"np": np, "ufl": ufl}
-        
+
         # If mesh is provided, add x as the spatial coordinate
         if mesh is not None:
             x = ufl.SpatialCoordinate(mesh)
@@ -46,136 +46,66 @@ def read_input_field(expression: Union[str, float, int], mesh=None):
 
         # Now, evaluate the expression in this context
         return eval(expression, context)
-    
+
     else:
         raise ValueError("Expression must be a string, int, or float.")
 
-
-def parse_nonneg_int(s):
-    try:
-        i = int(s)
-    except ValueError:
-        raise ValueError(f"Invalid input “{s}”: not an integer.")
-    if i < 0:
-        raise ValueError(f"Invalid input “{s}”: must be ≥ 0.")
-
-    if i != s:
-        raise ValueError(f"Invalid input “{s}”: must be integer")
-    
-
 # read yml file
 def read_input_file(input_yml_file):
-        
+
         # read input yml file
         with open(input_yml_file, 'r') as file:
             try:
                 config = yaml.safe_load(file)
             except yaml.YAMLError as exc:
-                print(exc)        
-            
-        input_parameters = dict()
+                print(exc)
+
+        input_parameters = {
+                'C_M': 1.0, 'cuda': False, 'sigma_i': 1.0,
+                'sigma_e': 1.0, 'R_g': 1.0, 'fem_order': 1,
+                'mesh_conversion_factor': 1.0,
+                'pc_type': 'hypre', 'ksp_type': 'cg', 'ksp_rtol': 1e-8,
+                'save_output': False, 'save_interval': 1, 'verbose': False,
+                'save_performance': False
+        }
+
+        input_parameters.update(config)
+        input_parameters['P'] = input_parameters['fem_order']
+
+        fnames = ['mesh_file', 'tags_dictionary_file']
+        required_parameters = ['dt', 'out_name'] + fnames
+        for param in required_parameters:
+            if param not in config:
+                raise ValueError(f"Missing required field '{param}'")
 
         ######### geometry #########
-        if 'mesh_file' in config:              
-            check_if_file_exists(config['mesh_file'])
-            input_parameters['mesh_file'] = config['mesh_file']                                        
-        else:
-            print('INPUT ERROR: provide mesh_file field in input .yml file')
-            return
-
-        if 'tags_dictionary_file' in config:      
-            check_if_file_exists(config['tags_dictionary_file'])
-            input_parameters['tags_dictionary_file'] = config['tags_dictionary_file']                                        
-        else:
-            print('INPUT ERROR: provide tags_dictionary_file field in input .yml file')
-            return
+        for fname in ['mesh_file', 'tags_dictionary_file']:
+            check_if_file_exists(config[fname])
 
         # get ECC tag if specified, otherwise use the minimum
-        if 'ECS_TAG' in config:                  
-            input_parameters['ECS_TAG'] = config['ECS_TAG']                                        
-        else:
-            
+        if 'ECS_TAG' not in config:
+
             with open(config["tags_dictionary_file"], "rb") as f:
+
                 membrane_tags = pickle.load(f)
 
-            input_parameters['ECS_TAG'] = min(membrane_tags.keys())          
-            
-            # Read input file 
-            if MPI.COMM_WORLD .rank == 0: print("ECS tag not specified, using minimum one:", input_parameters['ECS_TAG'])  
-            
-                
+            input_parameters['ECS_TAG'] = min(membrane_tags.keys())
+
+            # Read input file
+            if MPI.COMM_WORLD .rank == 0: print("ECS tag not specified, using minimum one:", input_parameters['ECS_TAG'])
+
+
         ######### problem #########
-        if 'dt' in config:
-            input_parameters['dt'] = config['dt']
-        else:
-            print('INPUT ERROR: provide dt in input .yml file')
-            return
-        
-        if 'time_steps' in config: 
-            input_parameters['time_steps'] = config['time_steps']            
-        elif 'T' in config:            
-            input_parameters['time_steps'] = int(config['T']/config['dt'])        
+
+        if 'time_steps' in config:
+            input_parameters['time_steps'] = config['time_steps']
+        elif 'T' in config:
+            input_parameters['time_steps'] = int(config['T']/config['dt'])
         else:
             raise SyntaxError(f'INPUT ERROR: provide final time T or time_steps in input .yml file.')
-            
-        if 'mesh_conversion_factor' in config: 
-            input_parameters['mesh_conversion_factor'] = config['mesh_conversion_factor']
-        else:
-            input_parameters['mesh_conversion_factor'] = 1.0
-        
-        # Membrane capacitance, (dafult 1) 
-        if 'C_M' in config: 
-            input_parameters['C_M'] = config['C_M']
-        else:
-            input_parameters['C_M'] = 1.0
 
-        # conductivities 
-        if 'sigma_i' in config: 
-            input_parameters['sigma_i'] = config['sigma_i']
-        else:
-            input_parameters['sigma_i'] = 1.0
-
-        if 'sigma_e' in config: 
-            input_parameters['sigma_e'] = config['sigma_e']
-        else:
-            input_parameters['sigma_e'] = 1.0
-        
-        if 'ELECTRODE_TAG' in config: 
-            input_parameters['ELECTRODE_TAG'] = config['ELECTRODE_TAG']
-
-            if 'sigma_electrode' in config: 
-                input_parameters['sigma_electrode'] = config['sigma_electrode']                       
-            else:
-                print(f"WARNING: ELECTRODE_TAG with no sigma_electrode in input file!")            
-
-        # Resistance 
-        if 'R_g' in config: 
-            input_parameters['R_g'] = config['R_g']
-        else:
-            input_parameters['R_g'] = 1.0
-                            
-        # finite element polynomial order (dafult 1) 
-        if 'fem_order' in config: 
-            input_parameters['P'] = config['fem_order']
-        else:
-            input_parameters['P'] = 1
-        
-        # initial membrane potential (dafult 1)
-        if 'v_init' in config: 
-            input_parameters['v_init'] = config['v_init']
-        else:
-            raise KeyError(f"Set v_init in input file!")
-
-        # boundary conditions (default = 0 -> zero Neumann)
-        if 'Dirichlet_points' in config: 
-            input_parameters['Dirichlet_points'] = config['Dirichlet_points']
-        else:
-            input_parameters['Dirichlet_points'] = 0
-
-            
-
-        # ionic model 
-        if 'ionic_model' in config: 
+        # ionic model
+        if 'ionic_model' in config:
             input_parameters['ionic_model'] = config['ionic_model']
 
             if isinstance(input_parameters['ionic_model'], dict):
@@ -184,55 +114,10 @@ def read_input_file(input_yml_file):
 
         else:
             print('WARNING: setting default passive ionic model')
-            input_parameters['ionic_model'] = "Passive"        
-            
-        ############### solver parameters ###############
+            input_parameters['ionic_model'] = "Passive"
 
-        if 'ksp_type' in config: 
-            input_parameters['ksp_type'] = config['ksp_type']
-        else:
-            input_parameters['ksp_type'] = 'cg'        
-
-        if 'pc_type' in config: 
-            input_parameters['pc_type'] = config['pc_type']
-        else:
-            input_parameters['pc_type'] = 'hypre'        
-
-        if 'ksp_rtol' in config: 
-            input_parameters['ksp_rtol'] = config['ksp_rtol']
-        else:
-            input_parameters['ksp_rtol'] = 1e-8
-        
-        if 'save_output' in config: 
-            input_parameters['save_output'] = config['save_output']
-        else:
-            input_parameters['save_output'] = False
-
-        if 'save_interval' in config: 
-            input_parameters['save_interval'] = config['save_interval']
-        else:
-            input_parameters['save_interval'] = 1            
-        
-        if 'verbose' in config: 
-            input_parameters['verbose'] = config['verbose']
-        else:
-            input_parameters['verbose'] = False
-
-        if 'out_name' in config:
-            input_parameters['out_name'] = "_" + config['out_name']
-            print('WARNING: Paraview states only work with defult output names.')
-        else:
-            input_parameters['out_name'] = ''            
-            # raise SyntaxError(f'INPUT ERROR: provide name of output in input .yml file.')
-
-
-        # sanuty checks
-        parse_nonneg_int(input_parameters['P'])
-        parse_nonneg_int(input_parameters['time_steps'])
-        parse_nonneg_int(input_parameters['Dirichlet_points'])
-                
         return input_parameters
-     
+
 
 def update_status(message):
     sys.stdout.write(f'\r{message}')
@@ -240,7 +125,7 @@ def update_status(message):
 
 
 def check_if_file_exists(file_path):
-    if not os.path.exists(file_path):        
+    if not os.path.exists(file_path):
         print(f"The file '{file_path}' does not exist.")
         exit()
 
@@ -258,26 +143,8 @@ def dump(thing, path):
     assert np.all(np.isfinite(m.data))
     return np.save(path, np.c_[m.row, m.col, m.data]), sio.savemat(path, {name: m})
 
-def save_petsc_matrix_to_matlab(A, filename="A.mat", varname="A"):
-    """
-    Convert a PETSc matrix A to SciPy CSR and save it in MATLAB .mat format.
-    
-    Parameters:
-        A        : PETSc.Mat (assembled matrix)
-        filename : str, output .mat file
-        varname  : str, variable name in MATLAB
-    """
-    # Convert PETSc matrix to CSR format
-    ai, aj, av = A.getValuesCSR()
-    rows, cols = A.getSize()
-    csr = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
 
-    # Save as MATLAB .mat file
-    sio.savemat(filename, {varname: csr})
-
-
-
-def common_elements(set1, set2):    
+def common_elements(set1, set2):
     return set1.intersection(set2)
 
 def plot_sparsity_pattern(A):
@@ -290,18 +157,3 @@ def plot_sparsity_pattern(A):
     plt.xlabel("Column Index")
     plt.ylabel("Row Index")
     plt.show()
-
-
-def save_sparsity_pattern(A, filename="sparsity.png"):
-    ai, aj, av = A.getValuesCSR()
-    rows, cols = A.getSize()
-    sparse_matrix = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
-
-    plt.figure(figsize=(8, 8))
-    plt.spy(sparse_matrix, markersize=1)
-    plt.title("Sparsity Pattern of the Matrix")
-    plt.xlabel("Column Index")
-    plt.ylabel("Row Index")
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    plt.close()  # prevent display in some backends
