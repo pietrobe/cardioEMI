@@ -1,8 +1,8 @@
 from mpi4py   import MPI
 from typing   import Union
 from petsc4py import PETSc
-import scipy.sparse as sparse
-import scipy.io as sio
+#import scipy.sparse as sparse
+#import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
 import matplotlib.pyplot as plt
@@ -10,8 +10,9 @@ import sys
 import ufl
 import os
 import yaml
-import pickle
-
+import pickle 
+from dolfinx.fem import Expression
+from dolfinx.fem import FunctionSpace
 
 # Assign intial membrane potential
 class Read_input_field:
@@ -50,6 +51,17 @@ def read_input_field(expression: Union[str, float, int], mesh=None):
     else:
         raise ValueError("Expression must be a string, int, or float.")
 
+def parse_nonneg_int(s):
+    try:
+        i = int(s)
+    except ValueError:
+        raise ValueError(f"Invalid input “{s}”: not an integer.")
+    if i < 0:
+        raise ValueError(f"Invalid input “{s}”: must be ≥ 0.")
+
+    if i != s:
+        raise ValueError(f"Invalid input “{s}”: must be integer")
+
 # read yml file
 def read_input_file(input_yml_file):
 
@@ -58,22 +70,24 @@ def read_input_file(input_yml_file):
             try:
                 config = yaml.safe_load(file)
             except yaml.YAMLError as exc:
-                print(exc)
-
+                print(exc)        
+            
         input_parameters = {
                 'C_M': 1.0, 'cuda': False, 'sigma_i': 1.0,
                 'sigma_e': 1.0, 'R_g': 1.0, 'fem_order': 1,
                 'mesh_conversion_factor': 1.0,
                 'pc_type': 'hypre', 'ksp_type': 'cg', 'ksp_rtol': 1e-8,
                 'save_output': False, 'save_interval': 1, 'verbose': False,
-                'save_performance': False
-        }
+                'save_performance': False, 'petsc_opts': {},
+                'I_stim': "100.0 * (x[0] < 0.03)", 'stim_start': 0.0,
+                'stim_end': 1.0, "Dirichlet_points": 0
+        } 
 
         input_parameters.update(config)
         input_parameters['P'] = input_parameters['fem_order']
 
         fnames = ['mesh_file', 'tags_dictionary_file']
-        required_parameters = ['dt', 'out_name'] + fnames
+        required_parameters = ['dt', 'out_name', 'v_init'] + fnames
         for param in required_parameters:
             if param not in config:
                 raise ValueError(f"Missing required field '{param}'")
@@ -83,8 +97,8 @@ def read_input_file(input_yml_file):
             check_if_file_exists(config[fname])
 
         # get ECC tag if specified, otherwise use the minimum
-        if 'ECS_TAG' not in config:
-
+        if 'ECS_TAG' not in config:                  
+            
             with open(config["tags_dictionary_file"], "rb") as f:
 
                 membrane_tags = pickle.load(f)
@@ -96,16 +110,18 @@ def read_input_file(input_yml_file):
 
 
         ######### problem #########
-
-        if 'time_steps' in config:
-            input_parameters['time_steps'] = config['time_steps']
-        elif 'T' in config:
-            input_parameters['time_steps'] = int(config['T']/config['dt'])
+        if 'time_steps' in config: 
+            input_parameters['time_steps'] = config['time_steps']            
+        elif 'T' in config:            
+            input_parameters['time_steps'] = int(config['T']/config['dt'])        
         else:
             raise SyntaxError(f'INPUT ERROR: provide final time T or time_steps in input .yml file.')
+            
+        if 'ELECTRODE_TAG' in config and 'sigma_electrode' not in config: 
+            print(f"WARNING: ELECTRODE_TAG with no sigma_electrode in input file!")            
 
-        # ionic model
-        if 'ionic_model' in config:
+        # ionic model 
+        if 'ionic_model' in config: 
             input_parameters['ionic_model'] = config['ionic_model']
 
             if isinstance(input_parameters['ionic_model'], dict):
@@ -116,6 +132,48 @@ def read_input_file(input_yml_file):
             print('WARNING: setting default passive ionic model')
             input_parameters['ionic_model'] = "Passive"
 
+        if 'ksp_type' in config: 
+            input_parameters['ksp_type'] = config['ksp_type']
+        else:
+            input_parameters['ksp_type'] = 'cg'        
+
+        if 'pc_type' in config: 
+            input_parameters['pc_type'] = config['pc_type']
+        else:
+            input_parameters['pc_type'] = 'hypre'        
+
+        if 'ksp_rtol' in config: 
+            input_parameters['ksp_rtol'] = config['ksp_rtol']
+        else:
+            input_parameters['ksp_rtol'] = 1e-8
+        
+        if 'save_output' in config: 
+            input_parameters['save_output'] = config['save_output']
+        else:
+            input_parameters['save_output'] = False
+
+        if 'save_interval' in config: 
+            input_parameters['save_interval'] = config['save_interval']
+        else:
+            input_parameters['save_interval'] = 1            
+        
+        if 'verbose' in config: 
+            input_parameters['verbose'] = config['verbose']
+        else:
+            input_parameters['verbose'] = False
+
+        if 'out_name' in config:
+            input_parameters['out_name'] = "_" + config['out_name']
+            #print('WARNING: Paraview states only work with default output names.')
+        else:
+            input_parameters['out_name'] = ''            
+            # raise SyntaxError(f'INPUT ERROR: provide name of output in input .yml file.')
+
+        # sanity checks
+        parse_nonneg_int(input_parameters['P'])
+        parse_nonneg_int(input_parameters['time_steps'])
+        parse_nonneg_int(input_parameters['Dirichlet_points'])
+                
         return input_parameters
 
 
@@ -143,8 +201,29 @@ def dump(thing, path):
     assert np.all(np.isfinite(m.data))
     return np.save(path, np.c_[m.row, m.col, m.data]), sio.savemat(path, {name: m})
 
-
 def common_elements(set1, set2):
+    return set1.intersection(set2)
+
+def save_petsc_matrix_to_matlab(A, filename="A.mat", varname="A"):
+
+    print("Saving matrix into MATLAB format...")
+    """
+    Convert a PETSc matrix A to SciPy CSR and save it in MATLAB .mat format.
+    
+    Parameters:
+        A        : PETSc.Mat (assembled matrix)
+        filename : str, output .mat file
+        varname  : str, variable name in MATLAB
+    """
+    # Convert PETSc matrix to CSR format
+    ai, aj, av = A.getValuesCSR()
+    rows, cols = A.getSize()
+    csr = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
+
+    # Save as MATLAB .mat file
+    sio.savemat(filename, {varname: csr})
+
+def common_elements(set1, set2):    
     return set1.intersection(set2)
 
 def plot_sparsity_pattern(A):

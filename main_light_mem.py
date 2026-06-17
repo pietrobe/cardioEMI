@@ -1,14 +1,8 @@
 import ufl
 import time
 import pickle
-try:
-    import multiphenicsx.fem
-    import multiphenicsx.fem.petsc
-except ImportError:
-    print("Missing multiphenicsx! Code will only run with CUDA enabled.")
 import dolfinx  as dfx
 import json
-import numpy as np
 from ufl      import inner, grad
 from sys      import argv, stdout
 from mpi4py   import MPI
@@ -53,6 +47,12 @@ cuda = params["cuda"]
 
 if cuda:
     import cudolfinx as cufem
+else:
+    import multiphenicsx.fem
+    import multiphenicsx.fem.petsc
+
+# get expression of initial mmebrane potential
+v_init = Read_input_field(params['v_init'])
 
 #-----------------------#
 #          MESH         #
@@ -73,7 +73,8 @@ if comm.rank == 0: print("Num tags", TAGS)
 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     # Read mesh and cell tags
     mesh       = xdmf.read_mesh(ghost_mode=dfx.mesh.GhostMode.shared_facet)
-    subdomains = xdmf.read_meshtags(mesh, name="cell_tags")    
+    subdomains = xdmf.read_meshtags(mesh, name="cell_tags")
+
     # Create facet-to-cell connectivity
     mesh.topology.create_connectivity(mesh.topology.dim-1, mesh.topology.dim)
 
@@ -81,6 +82,7 @@ with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
     mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim)
 
     boundaries = xdmf.read_meshtags(mesh, name="facet_tags")
+
     if cuda and comm.size > 1:
         mesh = cufem.ghost_layer_mesh(mesh)
         subdomains = cufem.ghost_layer_meshtags(subdomains, mesh)
@@ -105,17 +107,13 @@ sigma_i = read_input_field(params['sigma_i'], mesh=mesh)
 sigma_e = read_input_field(params['sigma_e'], mesh=mesh)
 tau     = dt/params["C_M"]
 
-# add electrode conductivity if present
-using_electrode = ("sigma_electrode" in params)
-
-if using_electrode:    
-    sigma_electrode = read_input_field(params['sigma_electrode'], mesh=mesh)
-    ELECTRODE_TAG   = params["ELECTRODE_TAG"]
-
 #------------------------------------------#
 #     FUNCTION SPACES AND RESTRICTIONS     #
 #------------------------------------------#
 V = dfx.fem.functionspace(mesh, ("Lagrange", params["P"])) # Space for functions defined on the entire mesh
+
+# vector for space, one for each tag
+V_dict = dict()
 
 # trial and test functions
 u_dict = dict()
@@ -123,8 +121,6 @@ v_dict = dict()
 
 # list for storing the solutions and forcing factors
 uh_dict  = dict()
-vij_dict = dict()
-fg_dict  = dict()
 
 # to store membrane potential
 v = dfx.fem.Function(V)
@@ -132,37 +128,19 @@ v.name = "v"
 
 for i in TAGS:
 
-    u_dict[i]  = ufl.TrialFunction(V)
-    v_dict[i]  =  ufl.TestFunction(V)
-    uh_dict[i] =  dfx.fem.Function(V)
+    V_i = V.clone()
+
+    V_dict[i]  = V_i
+    u_dict[i]  = ufl.TrialFunction(V_i)
+    v_dict[i]  =  ufl.TestFunction(V_i)
+    uh_dict[i] =  dfx.fem.Function(V_i)
     
-    # v_ij con i < j to avoid repetions
-    for j in TAGS:
-        if i < j:
-            # Membrane potential and forcing term function
-            vij_dict[(i,j)] = dfx.fem.Function(V)
-            fg_dict[(i,j)]  = dfx.fem.Function(V)
 
-# get expression of initial membrane potential
-v_init_expr = Read_input_field(params['v_init'])
-
-# turn expression into a Function with actual DOF values
-v_init = dfx.fem.Function(V)
-v_init.interpolate(v_init_expr)
-        
-# init vij using initial membrane potential
-for i in TAGS:
-
-    # interpolate v_init in intra_extra, intra_intra is 0 by default
-    if i < ECS_TAG:
-        vij_dict[(i,ECS_TAG)].interpolate(v_init)
-        # v.x.array[:] += vij_dict[(i,ECS_TAG)].x.array[:]
-
-    elif i > ECS_TAG:
-        vij_dict[(ECS_TAG,i)].interpolate(v_init)
-
+# new membrane voltage 
+fg  = dfx.fem.Function(V)
+v.interpolate(v_init)    
 # save membrane potential for visualization (valid only for extra-intra)
-v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:]
+# v.x.array[:] = vij_dict[(TAGS[0],TAGS[1])].x.array[:]
 
 ##### Restrictions #####
 restriction = []
@@ -176,27 +154,16 @@ for i in TAGS:
     # Get indices of the cells of the intra- and extracellular subdomains
     cells_Omega_i = subdomains.indices[subdomains.values == i]
 
-    if i == ECS_TAG and using_electrode:        
-        cells_Omega_electrode = subdomains.indices[subdomains.values == ELECTRODE_TAG]      
-        cells_Omega_i = np.concatenate([cells_Omega_i, cells_Omega_electrode])                          
-
     # Get dofs of the intra- and extracellular subdomains
     dofs_Vi_Omega_i = dfx.fem.locate_dofs_topological(V_i, subdomains.dim, cells_Omega_i)
-
+    tot_dofs += len(dofs_Vi_Omega_i)
     # Define the restrictions of the subdomains
     restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
-
-    restriction.append(restriction_Vi_Omega_i)
-    tot_dofs += len(dofs_Vi_Omega_i)
-
-    # Define the restrictions of the subdomains
     if cuda:
         restriction_dof_list.append(dofs_Vi_Omega_i)
         local_size = int(sum(dofs_Vi_Omega_i<V_i.dofmap.index_map.size_local))
         restriction_local_sizes.append(local_size)
-    else:
-        restriction_Vi_Omega_i = multiphenicsx.fem.DofMapRestriction(V_i.dofmap, dofs_Vi_Omega_i)
-        restriction.append(restriction_Vi_Omega_i)
+    restriction.append(restriction_Vi_Omega_i)
 #if comm.rank == 0: print("Sum of dofs across tags", tot_dofs, " total ", V.dofmap.index_map.size_global)
 # timers
 if comm.rank == 0: print(f"Creating FEM spaces:    {time.perf_counter() - t1:.2f} seconds")
@@ -214,54 +181,7 @@ for i in TAGS:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=False)
             else:
                 ionic_models[(i,j)] = ionic_model_factory(params, intra_intra=True, V=V)
-
-if comm.rank == 0: print(f"making ionic models: {time.perf_counter() - t1:.2f} seconds")        
-
-####### BC #######
-number_of_Dirichlet_points = params['Dirichlet_points']
-Dirichletbc = (number_of_Dirichlet_points > 0) 
-
-bcs = []
-
-if Dirichletbc:
-
-    # Apply zero Dirichlet condition
-    zero = dfx.fem.Constant(mesh, 0.0)        
-
-    # identify local boundary DOFs + coords
-    boundary_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
-    local_bdofs = dfx.fem.locate_dofs_topological(V, mesh.topology.dim-1, boundary_facets)
-    coords = V.tabulate_dof_coordinates()
-    local_coords = coords[local_bdofs]      # shape (n_loc, gdim)
-
-    # local to global
-    imap = V.dofmap.index_map
-    first_global = imap.local_range[0]       # first global index on this rank
-    local_global_bdofs = first_global + local_bdofs
-
-    # gather everyone’s cands to rank 0
-    all_globals = comm.gather(local_global_bdofs, root=0)
-    all_coords  = comm.gather(local_coords,      root=0)
-
-    # on rank 0 pick the 10 “corner‐nearest” by taxi‐distance
-    if comm.rank == 0:
-        G  = np.concatenate(all_globals)
-        C  = np.vstack(all_coords)
-        scores = C.sum(axis=1)
-        chosen_global = G[np.argsort(scores)[-number_of_Dirichlet_points:]] # opposite corner
-        #chosen_global = G[np.argsort(scores)[:number_of_Dirichlet_points]]
-    else:
-        chosen_global = None
-
-    # broadcast the final 10 GLOBAL DOFs to everyone
-    chosen_global = comm.bcast(chosen_global, root=0)
-
-    # each rank picks from its local globals, maps back to local indices
-    mask = np.isin(local_global_bdofs, chosen_global)
-    local_chosen = local_bdofs[mask].astype(np.int32)
-    bcs.append(dfx.fem.dirichletbc(zero, local_chosen, V))
-
-##############
+if comm.rank == 0: print(f"making ionic models: {time.perf_counter() - t1:.2f} seconds")
 #------------------------------------#
 #        VARIATIONAL PROBLEM         #
 #------------------------------------#
@@ -283,36 +203,30 @@ for i in TAGS:
     else:
         sigma = sigma_i # intra-cellular
 
-    v_i = v_dict[i] 
-    
+    v_i = v_dict[i]
+
     for j in TAGS:
-        
+
         u_j  = u_dict[j]
 
-        membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))   
+        membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))
         # if cells i and j have a membrane in common
         if len(membrane_ij) > 0:
 
-            if i == j:                                                      
-                
-                a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)                  
-
-                if i == ECS_TAG and using_electrode:
-                    a_ij +=  tau * inner(sigma_electrode * grad(u_j), grad(v_i)) * dx(ELECTRODE_TAG)                       
-
-            else:                                            
-                a_ij = - inner(u_j('+'), v_i('-')) * dS(membrane_ij)                                      
+            if i == j:
+                a_ij = tau * inner(sigma * grad(u_j), grad(v_i)) * dx(i) + inner(u_j('-'), v_i('-')) * dS(membrane_ij)
+            else:
+                a_ij = - inner(u_j('+'), v_i('-')) * dS(membrane_ij)
         else:
             a_ij = None
 
-        a_i.append(a_ij)   
+        a_i.append(a_ij)
 
     a.append(a_i)
+
 if cuda:
     asm = cufem.CUDAAssembler()
-    if comm.rank == 0: print("Making forms.")
     cuda_a = cufem.form(a, restriction=(restriction_dof_list, restriction_dof_list))
-    if comm.rank == 0: print("calling create matrix block.")
     cuda_A = asm.create_matrix_block(cuda_a)
 else:
     # Converte form to dolfinx form
@@ -320,43 +234,51 @@ else:
 
 # timers
 if comm.rank == 0: print(f"Creating bilinear form: {time.perf_counter() - t1:.2f} seconds")
-t1 = time.perf_counter() 
+t1 = time.perf_counter()
 
 # #---------------------------#
 # #      MATRIX ASSEMBLY      #
 # #---------------------------#
 
 if cuda:
-  asm.assemble_matrix_block(cuda_a, cuda_A,  bcs=bcs)
+  asm.assemble_matrix_block(cuda_a, cuda_A)
   cuda_A.assemble()
   A = cuda_A.mat
 else:
   # Assemble the block linear system matrix
-  A = multiphenicsx.fem.petsc.assemble_matrix_block(a, bcs=bcs, restriction=(restriction, restriction))
+  A = multiphenicsx.fem.petsc.assemble_matrix_block(a, restriction=(restriction, restriction))
   A.assemble()
-print(f"A norm {A.norm()}")
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 matrix_assemble_time = assemble_time
 
+
 if comm.rank == 0: print(f"Assembling matrix A:    {time.perf_counter() - t1:.2f} seconds")
+
+# # Save A
+# save_petsc_matrix_to_matlab(A, 'output/A.mat','A')
+# # Plot sparsity pattern 
+# save_sparsity_pattern(A, 'output/sparsity.png')
+# exit()
 
 #---------------------------------#
 #        CREATE NULLSPACE         #
 #---------------------------------#
 
-if not Dirichletbc:
-    # Create the PETSc nullspace vector and check that it is a valid nullspace of A
-    nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
-    assert nullspace.test(A)
-    # For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
-    # sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
-    # Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
-    A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
-    A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
-    # Set the nullspace
-    A.setNullSpace(nullspace)
-    #if params["ksp_type"] == "cg":
-    #    A.setNearNullSpace(nullspace)
+# Create the PETSc nullspace vector and check that it is a valid nullspace of A
+nullspace = PETSc.NullSpace().create(constant=True,comm=comm)
+assert nullspace.test(A)
+# For convenience, we explicitly inform PETSc that A is symmetric, so that it automatically
+# sets the nullspace of A^T too (see the documentation of MatSetNullSpace).
+# Symmetry checked also by direct inspection through the plot_sparsity_pattern() function
+A.setOption(PETSc.Mat.Option.SYMMETRIC, True)
+A.setOption(PETSc.Mat.Option.SYMMETRY_ETERNAL, True)
+# Set the nullspace
+if params["ksp_type"] == "cg":
+    PETSc.Mat.setNullSpace(A, nullspace)
+    #PETSc.Mat.setNearNullSpace(A, nullspace)
+#    A.setNearNullSpace(nullspace)
+else: # direct solver
+    PETSc.Mat.setNullSpace(A, nullspace)
 
 #---------------------------------#
 #      CONFIGURE SOLVER           #
@@ -378,83 +300,50 @@ opts = PETSc.Options()
 
 if params["verbose"]:
     opts.setValue('ksp_view', None)
-    opts.setValue('ksp_monitor_true_residual', None)    
-    opts.setValue('ksp_converged_reason', None)    
+    opts.setValue('ksp_monitor_true_residual', None)
 
-# for iterative solvers set tolerance
+# for titerastive solvers set tolerance
 if params['pc_type'] != "lu" and params['ksp_type'] != "preonly":
     opts.setValue('ksp_rtol', params["ksp_rtol"])
     opts.setValue('ksp_converged_reason', None)
 
 if params['pc_type'] == "hypre":
     opts.setValue("pc_hypre_boomeramg_relax_type_all", "l1scaled-SOR/Jacobi")
-    opts.setValue("pc_hypre_boomeramg_agg_nl", 1)
-    if mesh.geometry.dim == 3:
-        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.25) # CHECK this 
+    #opts.setValue("pc_hypre_boomeramg_interp_type", "ext+i")
+    #opts.setValue("pc_hypre_boomeramg_coarsen_type", "HMIS") # not supported on GPU
+    #opts.setValue("pc_hypre_boomeramg_agg_nl", 1) # aggressive coarsening
+    #opts.setValue("pc_hypre_boomeramg_agg_num_paths", 5) # aggressive coarsening paths
+    #opts.setValue("pc_hypre_boomeramg_P_max", 2) # max elements per row for interpolation operator
+    #opts.setValue("pc_hypre_boomeramg_truncfactor", 0.5) # coarsening during interpolation threshold
+    #opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.25)
 opts.setValue("ksp_norm_type", "unpreconditioned")
-if "petsc_opts" in params:
-    for k,v in params["petsc_opts"].items():
-        if comm.rank == 0: print(f"Setting solver option '{k}' to '{v}'")
-        opts.setValue(k,v)
 ksp.setFromOptions()
 
 # intial time
 t = 0.0
 
-# print("Saving matrix")
-# save_petsc_matrix_to_matlab(A, filename="A.mat", varname="A")
-
-
 # Create output files
 if params["save_output"]:
 
     # rename solutions
-    for i in TAGS:        
+    for i in TAGS:
         uh_dict[i].name  = "u_" + str(i)
-    
-    out_name = params.get("out_name", "").strip().lstrip("_")
 
     # potentials xdmf
-    out_sol = dfx.io.XDMFFile(comm, out_name + "/solution.xdmf", "w")
-    out_sol.write_mesh(mesh)            
-        
+    out_sol = dfx.io.XDMFFile(comm, "output/solution-" + params["out_name"] + ".xdmf", "w")
+    out_sol.write_mesh(mesh)
+
     # memebrane potential xdmf
-    out_v = dfx.io.XDMFFile(comm, out_name + "/v.xdmf" , "w")
+    out_v = dfx.io.XDMFFile(comm, "output/v-" + params["out_name"] + ".xdmf" , "w")
     out_v.write_mesh(mesh)
     out_v.write_function(v, t)
 
     # save subdomain data, needed for parallel visualizaiton
-    with dfx.io.XDMFFile(comm, out_name + "/tags.xdmf", "w") as out_tags:                     
-        out_tags.write_mesh(mesh)            
+    with dfx.io.XDMFFile(comm, "output/tags-" + params["out_name"] + ".xdmf", "w") as out_tags:
+        out_tags.write_mesh(mesh)
         out_tags.write_meshtags(subdomains, mesh.geometry)
-        out_tags.write_meshtags(boundaries, mesh.geometry)        
+        out_tags.write_meshtags(boundaries, mesh.geometry)
         out_tags.close()
-
-
-#---------------------------------#
-#        STIMULUS SETUP           #
-#---------------------------------#
-
-# user parameters
-stim_expr  = params.get("I_stim", "100.0 * (x[0] < 0.03)")
-stim_start = params.get("stim_start", 0.0)  # ms
-stim_end   = params.get("stim_end", 1.0)    # ms
-
-# Build a stimulus Function per tag/space (so spaces match v_i and uh_dict[i])
-stim_fun = {}
-coords = V.tabulate_dof_coordinates().reshape((-1, mesh.geometry.dim))
-xlist = [coords[:, 0], coords[:, 1], coords[:, 2]]
-vals  = eval(stim_expr, {"x": xlist, "np": np})
-f = dfx.fem.Function(V)
-f.x.array[:] = np.asarray(vals, dtype=float)
-for i in TAGS:
-    stim_fun[i] = f
-
-# Time-dependent amplitude as a Constant (UFL-safe)
-stim_amp = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))
-
-ksp_iterations = []
-I_ion = {}
 
 #---------------------------------#
 #        SOLUTION TIMELOOP        #
@@ -462,7 +351,7 @@ I_ion = {}
 
 # init auxiliary data structures
 ksp_iterations = []
-#I_ion = dict()
+I_ion = dict()
 
 if comm.rank == 0: print("\n#-----------SOLVE----------#")
 
@@ -472,104 +361,93 @@ for time_step in range(params["time_steps"]):
 
     if comm.rank == 0: update_status(f'Time stepping: {int(100*time_step/params["time_steps"])}%')
 
-    # physical time at current step (before advancing)
-    t_n = float(time_step) * float(dt)
-
-    # update stimulus amplitude based on current time
-    if (stim_start <= t_n) and (t_n < stim_end):
-        stim_amp.value = 1.0
-    else:
-        stim_amp.value = 0.0
-
     # init data structure for linear form
     L_list = []
-
-    # Update and assemble vector that is the RHS of the linear system
-    t1 = time.perf_counter() # Timestamp for assembly time-lapse      
-    
-    for i in TAGS:
-
-        membrane_i = membrane_tags[i]
-        
-        v_i = v_dict[i]
-
-        L_i = 0
-
-        for j in TAGS:                        
-            
-            if i != j:
-                if time_step == 0: 
-                    membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))   
-                
-                if i < j:
-                    ij_tuple = (i,j)                                        
-                    L_coeff  = 1
-                    with vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
-
-                        t_ODE = time.perf_counter()
-                        
-                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])          
-
-                        ODEs_time += time.perf_counter() - t_ODE 
-                else:
-                    ij_tuple = (j,i)
-                    L_coeff  = -1                    
-                with fg_dict[ij_tuple].x.petsc_vec.localForm() as fg_local, vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
-
-                    fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
-
-                if time_step == 0:
-                    L_i += L_coeff * inner(fg_dict[ij_tuple], v_i('+')) * dS(membrane_ij)
-
-                    # external stimulus (time-switched by Constant)
-                    if ECS_TAG in (i, j):
-                        L_i += L_coeff * tau * stim_amp * inner(stim_fun[i], v_i('+')) * dS(membrane_ij)
-
-        if time_step == 0:                        
-            L_list.append(L_i)
 
     # Increment time
     t += float(dt)
 
+    # Update and assemble vector that is the RHS of the linear system
+    t1 = time.perf_counter() # Timestamp for assembly time-lapse
+
+    for i in TAGS:
+
+        membrane_i = membrane_tags[i]
+
+        v_i = v_dict[i]
+
+        L_i = 0
+
+        for j in TAGS:
+
+            if i != j:
+                if time_step == 0:
+                    membrane_ij = tuple(common_elements(membrane_i,membrane_tags[j]))
+
+                if i < j:
+                    ij_tuple = (i,j)
+                    L_coeff  = 1
+                    #with vij_dict[ij_tuple].x.petsc_vec.localForm() as v_local:
+                    with v.x.petsc_vec.localForm() as v_local:
+                        t_ODE = time.perf_counter()
+
+                        I_ion[ij_tuple] = ionic_models[ij_tuple]._eval(v_local[:])
+
+                        ODEs_time += time.perf_counter() - t_ODE
+                else:
+                    ij_tuple = (j,i)
+                    L_coeff  = -1
+                with fg.x.petsc_vec.localForm() as fg_local, v.x.petsc_vec.localForm() as v_local:
+
+                    fg_local[:] = v_local[:] - tau * I_ion[ij_tuple]
+
+                if time_step == 0:
+                    L_i += L_coeff * inner(fg, v_i('+')) * dS(membrane_ij)
+        if time_step == 0:
+            L_list.append(L_i)
+
     t_test = time.perf_counter()
-    
+
     # create some data structures
-    if time_step == 0: 
+    if time_step == 0:
         if cuda:
             L = cufem.form(L_list, restriction=restriction_dof_list)
             cuda_b = asm.create_vector_block(L)
             b = cuda_b.vector
             sol_vec = b.copy()
         else:
-            # Convert form to dolfinx form                    
-            L = dfx.fem.form(L_list, jit_options=jit_parameters) 
+            # Convert form to dolfinx form
+            L = dfx.fem.form(L_list, jit_options=jit_parameters)
 
-            # Create right-hand side and solution vectors        
+            # Create right-hand side and solution vectors
             b       = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
             sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
         vector_assemble_setup_time = time.perf_counter() - t_test
     if cuda:
         asm.assemble_vector_block(L, cuda_b)
-        # apply lifting
-        asm.apply_lifting_block(cuda_b, cuda_a, bcs, set_bcs=True)
     else:
         # Clear RHS vector to avoid accumulation and assemble RHS
         b.array[:] = 0
         b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-        multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, bcs=bcs, restriction=restriction) # Assemble RHS vector        
+        multiphenicsx.fem.petsc.assemble_vector_block(b, L, a, restriction=restriction) # Assemble RHS vector
+    # dump(b, 'output/bvec')
 
-    if not Dirichletbc:
-        # if the timestep is not zero, b changes anyway and the nullspace must be removed
-        nullspace.remove(b)
-    print(f"b norm {b.norm()}")
+    # Neumann BC
+    #if time_step == 0:
+
+        # Create solution vector
+    #    sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
+
+    # if the timestep is not zero, b changes anyway and the nullspace must be removed
+    nullspace.remove(b)
+
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
-    
+
     # Solve the system
     t1 = time.perf_counter() # Timestamp for solver time-lapse
     ksp.solve(b, sol_vec)
-
-    # store iterations
+    # store iterisons
     ksp_iterations.append(ksp.getIterationNumber())
     if ksp.getConvergedReason() < 0:
         print("failed for ", ksp.getConvergedReason())
@@ -578,7 +456,7 @@ for time_step in range(params["time_steps"]):
     if not cuda:
         # Update ghost values
         sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-    print(f"sol_vec norm {sol_vec.norm()}")
+
     # Extract sub-components of solution
     if cuda:
         offset = 0
@@ -590,22 +468,30 @@ for time_step in range(params["time_steps"]):
     else:
         dofmap_list = (N_TAGS) * [V.dofmap]
         with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(sol_vec, dofmap_list, restriction) as uij_wrapper:
-            for ui_ue_wrapper_local, component in zip(uij_wrapper, tuple(uh_dict.values())): 
+            for ui_ue_wrapper_local, component in zip(uij_wrapper, tuple(uh_dict.values())):
                 with component.x.petsc_vec.localForm() as component_local:
                     component_local[:] = ui_ue_wrapper_local
 
+    # Pass 1: intra-extra
     for i in TAGS:
         for j in TAGS:
-            if i < j:                
-                vij_dict[(i,j)].x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array # TODO test other order?
-                
-    
+            if i < j and (i == ECS_TAG or j == ECS_TAG):
+                v.x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
+
+
+    # Pass 2: intra-intra
+    for i in TAGS:
+        for j in TAGS:
+            if i < j and i != ECS_TAG and j != ECS_TAG:
+                v.x.array[:] = uh_dict[i].x.array - uh_dict[j].x.array
+
+
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
     # save xdmf output
-    if params["save_output"] and time_step % params["save_interval"] == 0:               
+    if params["save_output"] and time_step % params["save_interval"] == 0:
         for i in TAGS:
-            out_sol.write_function(uh_dict[i], t)        
+            out_sol.write_function(uh_dict[i], t)
         # fill v for visualization
         v.x.array[:] = uh_dict[ECS_TAG].x.array
 
@@ -616,7 +502,7 @@ for time_step in range(params["time_steps"]):
         out_v.write_function(v, t)
 
 
-if comm.rank == 0: update_status(f'Time stepping: 100%')        
+if comm.rank == 0: update_status(f'Time stepping: 100%')
 
 #------------------------------#
 #         POST PROCESS         #
@@ -632,11 +518,11 @@ max_local_vector_assemble_setup_time = comm.allreduce(vector_assemble_setup_time
 total_time = max_local_assemble_time + max_local_solve_time + max_local_ODE_time + max_local_setup_time
 
 # Print stuff
-if comm.rank == 0: 
+if comm.rank == 0:
     num_dofs = b.getSize()
     avg_ksp_its = sum(ksp_iterations)/len(ksp_iterations)
     print("\n\n#-----------INFO-----------#")
-    print("MPI size     =", comm.size)        
+    print("MPI size     =", comm.size)
     print("N_TAGS       =", N_TAGS   )
     print("dt           =", dt       )
     print("time steps   =", params["time_steps"])
@@ -648,13 +534,13 @@ if comm.rank == 0:
     print("Average KSP iterations =", avg_ksp_its)
     if failed:
         print("LINEAR SOLVER FAILED!!!")
-    
+
     if isinstance(params["ionic_model"], dict):
         print("Ionic models:")
         for key, value in params["ionic_model"].items():
             print(f"  {key}: {value}")
     else:
-        print("Ionic model:", params['ionic_model'])        
+        print("Ionic model:", params['ionic_model'])
 
 
     print("\n#-------TIME ELAPSED-------#")
@@ -662,16 +548,16 @@ if comm.rank == 0:
     print(f"Assembly time:    {max_local_assemble_time:.3f} seconds")
     print(f"Solve time:       {max_local_solve_time:.3f} seconds")
     print(f"Ionic model time: {max_local_ODE_time:.3f} seconds")
-    print(f"Total time:       {total_time:.3f} seconds")    
-    
+    print(f"Total time:       {total_time:.3f} seconds")
 
-if params["save_output"]:    
+
+if params["save_output"]:
 
     out_sol.close()
     out_v.close()
 
-    if comm.rank == 0: 
-        print("\nSolution saved in output folder")    
+    if comm.rank == 0:
+        print("\nSolution saved in output folder")
         print(f"Total script time (with output): {time.perf_counter() - start_time:.3f} seconds\n")
 
 if params["save_performance"] and comm.rank == 0:

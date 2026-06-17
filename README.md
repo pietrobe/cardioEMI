@@ -62,6 +62,8 @@ Similarly with `output/membrane_state.pvsm` to visualise ECS-ICS membrane potent
 
 * Pietro Benedusi
 * Edoardo Centofanti
+* Joshua Steyer
+* Benjamin Pachev
 
 ### Cite
 ```
