@@ -352,7 +352,7 @@ class Courtemanche_model(Ionic_model):
     # --- Ion concentrations (initial) ---
     Nai = 11.2
     Ki_init = 139.0
-    Cai_init = 1.02e-4 #1.02e-1 
+    Cai_init = 1.02e-1 #1.02e-1 
     Ca_up_init = 1.49
     Ca_rel_init = 1.49
 
@@ -625,7 +625,7 @@ class Courtemanche_model(Ionic_model):
 
         # f-gate (L-type Ca inactivation)
         f_inf = 1.0/(1.0+np.exp((V+28.0)/6.9))
-        tau_f = 9.0/(0.0197*np.exp(-0.0337*(V+10.0)**2) + 0.02)
+        tau_f = 9.0/(0.0197*np.exp(-0.0337**2*(V+10.0)**2) + 0.02)
         self.f = f_inf + (self.f - f_inf) * np.exp(-dt/tau_f)
 
         # f_Ca gate
@@ -676,8 +676,10 @@ class Courtemanche_model(Ionic_model):
 
         xs_inf = 1.0/np.sqrt(1.0+np.exp((V-19.9)/-12.7))
         tau_xs = 0.5/((4e-5*(V-19.9)/(1.0-np.exp((19.9-V)/17.0))) +
-                      (3.5e-5*(V-19.9)/(np.exp((19.9-V)/9.0)-1.0)))
+                      (3.5e-5*(V-19.9)/(np.exp((V-19.9)/9.0)-1.0)))
         self.xs = xs_inf + (self.xs - xs_inf) * np.exp(-dt/tau_xs)
+
+
 
 #   def init_png(self):
 

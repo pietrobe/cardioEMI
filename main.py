@@ -681,5 +681,7 @@ if params["save_performance"] and comm.rank == 0:
         "avg_ksp_its": avg_ksp_its,
         "failed": failed
     }
-    with open(params["out_name"]+f"-stats-{'cuda' if cuda else 'cpu'}-{comm.size}.json", "w") as fp:
+   
+    _out = params["out_name"].strip().lstrip("_")
+    with open(_out + f"/stats-{'cuda' if cuda else 'cpu'}-{comm.size}.json", "w") as fp:
         json.dump({"input": params, "performance": stats}, fp)
