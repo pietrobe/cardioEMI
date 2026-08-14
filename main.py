@@ -327,7 +327,8 @@ else:
   # Assemble the block linear system matrix
   A = multiphenicsx.fem.petsc.assemble_matrix_block(a, bcs=bcs, restriction=(restriction, restriction))
   A.assemble()
-if comm.rank == 0: print(f"A norm {A.norm()}")
+_An = A.norm()
+if comm.rank == 0: print(f"A norm {_An}")
 assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 matrix_assemble_time = assemble_time
 
@@ -554,7 +555,8 @@ for time_step in range(params["time_steps"]):
     if not Dirichletbc:
         # if the timestep is not zero, b changes anyway and the nullspace must be removed
         nullspace.remove(b)
-    if comm.rank == 0: print(f"b norm {b.norm()}")
+    _bn = b.norm()
+    if comm.rank == 0: print(f"b norm {_bn}")
     assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
 
     
@@ -571,7 +573,8 @@ for time_step in range(params["time_steps"]):
     if not cuda:
         # Update ghost values
         sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-    if comm.rank == 0: print(f"sol_vec norm {sol_vec.norm()}")
+    _sn = sol_vec.norm()
+    if comm.rank == 0: print(f"sol_vec norm {_sn}")
     # Extract sub-components of solution
     if cuda:
         offset = 0
