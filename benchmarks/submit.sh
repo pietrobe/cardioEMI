@@ -4,8 +4,8 @@
 #
 #   bash benchmarks/submit.sh <tables|runs|smoke> [gpu|cpu|both] [--dry-run]
 #
-#   <tables>  comma-separated among table4, table5, table8, table9, or all
-#             (table4/5: assembly, strong/weak; table8/9: Model B solver, strong/weak)
+#   <tables>  comma-separated among table4 ... table9, or all
+#             (table4/5: assembly; table6/7: Model A solver; table8/9: Model B solver; strong/weak)
 #   <runs>    comma-separated single runs, e.g. B3_n4,B4_n8 (all the inputs of each run)
 #   smoke     short installation check on the small mesh of data/ (1 GPU, 144 cores)
 #
@@ -50,9 +50,10 @@ while read -r run suffixes; do
     for fam in $fams; do
         configs=""
         for s in $suffixes; do
-            [ -f "benchmarks/inputs/$run/${fam}_$s.yml" ] || { echo "missing benchmarks/inputs/$run/${fam}_$s.yml"; exit 2; }
-            configs+="${fam}_$s "
+            # some configurations exist for one family only (e.g. Jacobi on GPU)
+            [ -f "benchmarks/inputs/$run/${fam}_$s.yml" ] && configs+="${fam}_$s "
         done
+        [ -n "$suffixes" ] && [ -z "$configs" ] && continue
         if [ "$fam" = gpu ]; then
             nodes=$(( (n + CARDIO_GPUS_PER_NODE - 1) / CARDIO_GPUS_PER_NODE ))
             extra=(--gpus-per-node="$CARDIO_GPUS_PER_NODE" --time="${CARDIO_TIME_GPU:-04:00:00}")

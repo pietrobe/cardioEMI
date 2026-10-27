@@ -13,6 +13,8 @@ Runs and the tables they feed (nodes as defined in the paper: one GH200 or
 
     Table 4  assembly, strong scaling   A1 and B1 at n = 1, 2, 4, 8          (AMG-CG runs)
     Table 5  assembly, weak scaling     A1-A4 and B1-B4 at n = 1, 2, 4, 8    (AMG-CG runs)
+    Table 6  solver, strong scaling     A1 at n = 1, 2, 4, 8                 GPU Jacobi-CG, AMG-CG
+    Table 7  solver, weak scaling       A1-A4 at n = 1, 2, 4, 8              GPU Jacobi-CG, AMG-CG
     Table 8  solver, strong scaling     B1 and B2 at n = 1, 2, 4, 8          AMG-CG
     Table 9  solver, weak scaling       B1-B4 at n = 1, 2, 4, 8              AMG-CG and AMG-GMRES
 
@@ -20,6 +22,7 @@ The assembly times come from the same runs as the solver times (main.py
 measures both). Solver options as in the appendix of the paper:
   - Model A: AMG with the default coarsening of each architecture, l1-scaled
     SOR/Jacobi smoother, strong threshold 0.25, no aggressive coarsening;
+    point-Jacobi CG on GPU only;
   - Model B: the same BoomerAMG on CPU and GPU (PMIS, ext+i, Chebyshev on every
     level, no C/F relaxation, no aggressive coarsening, min coarse size 2).
 CG uses homogeneous Neumann conditions and the constant nullspace, GMRES one
@@ -32,6 +35,7 @@ from pathlib import Path
 TIME_STEPS = 100
 SMOKE_TIME_STEPS = 3
 KSP_MAX_IT = 2000       # bound the cost of a stagnating solve
+JACOBI_MAX_IT = 30000   # Jacobi-CG needs about 1800-2300 iterations on Model A
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "inputs"
@@ -53,11 +57,17 @@ WEAK_B = [("B1", 1), ("B2", 2), ("B3", 4), ("B4", 8)]
 TABLES = {
     "table4": {f"{m}_n{n}": ["cg_amg"] for m in ("A1", "B1") for n in NODES},
     "table5": {f"{m}_n{n}": ["cg_amg"] for m, n in WEAK_A + WEAK_B},
+    "table6": {f"A1_n{n}": ["cg_amg", "cg_jacobi"] for n in NODES},
+    "table7": {f"{m}_n{n}": ["cg_amg", "cg_jacobi"] for m, n in WEAK_A},
     "table8": {f"{m}_n{n}": ["cg_amg"] for m in ("B1", "B2") for n in NODES},
     "table9": {f"{m}_n{n}": ["cg_amg", "gmres_amg"] for m, n in WEAK_B},
 }
 
-KRYLOV = {"cg_amg": dict(ksp="cg", dirichlet=0), "gmres_amg": dict(ksp="gmres", dirichlet=1)}
+KRYLOV = {"cg_amg": dict(ksp="cg", dirichlet=0, pc="hypre"),
+          "gmres_amg": dict(ksp="gmres", dirichlet=1, pc="hypre"),
+          "cg_jacobi": dict(ksp="cg", dirichlet=0, pc="jacobi")}
+# configurations run on one family only (paper: Jacobi on GPU only)
+FAMILIES = {"cg_jacobi": ("gpu",)}
 
 AMG_A = {
     "pc_hypre_boomeramg_relax_type_all": "l1scaled-SOR/Jacobi",
@@ -108,7 +118,7 @@ ionic_model:
 
 # Solver
 ksp_type: "{ksp}"
-pc_type : "hypre"
+pc_type : "{pc}"
 ksp_rtol: 1.0e-7
 petsc_opts:
   ksp_max_it: {max_it}
@@ -129,12 +139,16 @@ def write(run, mesh, suffixes, steps, amg):
     files = []
     for family, cuda in (("gpu", True), ("cpu", False)):
         for s in suffixes:
+            if family not in FAMILIES.get(s, ("gpu", "cpu")):
+                continue
             config = f"{family}_{s}"
+            k = KRYLOV[s]
             path = OUT / run / f"{config}.yml"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(TEMPLATE.format(
-                mesh=mesh, cuda=cuda, steps=steps, ksp=KRYLOV[s]["ksp"], dirichlet=KRYLOV[s]["dirichlet"],
-                max_it=KSP_MAX_IT, amg=amg_block(amg), run=run, config=config))
+                mesh=mesh, cuda=cuda, steps=steps, ksp=k["ksp"], dirichlet=k["dirichlet"], pc=k["pc"],
+                max_it=JACOBI_MAX_IT if k["pc"] == "jacobi" else KSP_MAX_IT,
+                amg=amg_block(amg) if k["pc"] == "hypre" else "", run=run, config=config))
             files.append(path)
     return files
 
@@ -163,6 +177,6 @@ if __name__ == "__main__":
         model = run.split("_n")[0]
         files += write(run, MESHES[model], suffixes, TIME_STEPS, AMG_A if model.startswith("A") else AMG_B)
     # installation check on the small mesh shipped with the repository
-    files += write("smoke", "data/robin-h21-25", list(KRYLOV), SMOKE_TIME_STEPS, AMG_B)
+    files += write("smoke", "data/robin-h21-25", ["cg_amg", "gmres_amg"], SMOKE_TIME_STEPS, AMG_B)
     for f in files:
         print(f.relative_to(ROOT.parent))

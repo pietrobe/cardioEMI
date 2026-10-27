@@ -1,4 +1,4 @@
-"""Build the paper's assembly and Model B solver tables from the benchmark results (standard library only).
+"""Build the paper's assembly and linear solver tables from the benchmark results (standard library only).
 
     python3 benchmarks/collect_tables.py [results_dir]      # default: benchmarks/results
 
@@ -9,6 +9,8 @@ written by benchmarks/run.sbatch. Prints Markdown tables and writes
 
   Table 4  assembly strong scaling, A1 and B1: right-hand side assembly, seconds per time step
   Table 5  assembly weak scaling, A1-A4 and B1-B4: assembly MDoFs/s per node
+  Table 6  solver strong scaling, A1: solve seconds per time step (iterations)
+  Table 7  solver weak scaling, A1-A4: solve MDoFs/s per node (iterations)
   Table 8  solver strong scaling, B1 and B2: AMG-CG solve, seconds per time step (iterations)
   Table 9  solver weak scaling, B1-B4: solve MDoFs/s per node (iterations)
 
@@ -33,8 +35,9 @@ NODES = (1, 2, 4, 8)
 WEAK_A = [("A1", 1), ("A2", 2), ("A3", 4), ("A4", 8)]
 WEAK_B = [("B1", 1), ("B2", 2), ("B3", 4), ("B4", 8)]
 SOLVERS = ["gpu_cg_amg", "gpu_gmres_amg", "cpu_cg_amg", "cpu_gmres_amg"]
+SOLVERS_A = ["gpu_cg_jacobi", "gpu_cg_amg", "cpu_cg_amg"]
 HEAD = {"gpu_cg_amg": "GPU AMG-CG", "gpu_gmres_amg": "GPU AMG-GMRES",
-        "cpu_cg_amg": "CPU AMG-CG", "cpu_gmres_amg": "CPU AMG-GMRES"}
+        "cpu_cg_amg": "CPU AMG-CG", "cpu_gmres_amg": "CPU AMG-GMRES", "gpu_cg_jacobi": "GPU Jacobi-CG"}
 REASON = re.compile(r"Linear solve (converged|did not converge) due to (\w+) iterations (\d+)")
 
 
@@ -100,6 +103,13 @@ def main(res):
             for a, b, n in zip(WEAK_A, WEAK_B, NODES)]
     tables.append(("Table 5: assembly weak scaling, MDoFs/s per node (A1-A4, B1-B4)", "Nodes", cols, rows))
 
+    cols = [HEAD[c] for c in SOLVERS_A]
+    rows = [[str(n)] + [fmt(get("A1", n, c), "solve_step", its=True) for c in SOLVERS_A] for n in NODES]
+    tables.append(("Table 6: Model A strong scaling (A1), solve seconds per time step (iterations)", "Nodes", cols, rows))
+
+    rows = [[str(n)] + [fmt(get(m, n, c), "solve_step", n, its=True) for c in SOLVERS_A] for m, n in WEAK_A]
+    tables.append(("Table 7: Model A weak scaling (A1-A4), solve MDoFs/s per node (iterations)", "Nodes", cols, rows))
+
     cols = ["B1 GPU", "B1 CPU", "B2 GPU", "B2 CPU"]
     rows = [[str(n)] + [fmt(get(m, n, f"{f}_cg_amg"), "solve_step", its=True) for m in ("B1", "B2") for f in ("gpu", "cpu")]
             for n in NODES]
@@ -128,6 +138,6 @@ def main(res):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Build Tables 4, 5, 8 and 9 from the benchmark results.")
+    ap = argparse.ArgumentParser(description="Build Tables 4-9 from the benchmark results.")
     ap.add_argument("results", nargs="?", default=str(Path(__file__).resolve().parent / "results"))
     main(Path(ap.parse_args().results))
