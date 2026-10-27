@@ -188,3 +188,6 @@ emigrid_mesh/*.elem
 emigrid_mesh/*.intra
 emigrid_mesh/*.extra
 emigrid_mesh/*.pvsm
+
+# Supplementary Materials package for the journal (built from a commit with git archive)
+SISC_supplementary_materials.zip
