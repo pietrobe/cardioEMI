@@ -1,6 +1,15 @@
 # cardioEMI
 Solving cell-by-cell (a.k.a. EMI) models for cardiac geometries.
 
+### Reproducibility of the paper
+The folder [benchmarks](benchmarks) contains the reproducibility material of
+
+> E. Centofanti, B. Pachev, J. Steyer, J. D. Trotter, P. Benedusi,
+> *Multi-GPU Acceleration of an Interface Problem with Application to Cardiac Modeling in FEniCS*, preprint, 2026.
+
+It provides the code, parameters and step-by-step instructions to reproduce the tables and figures of the paper
+(CPU vs GPU assembly and linear solver scaling with cuDOLFINx); see [benchmarks/README.md](benchmarks/README.md).
+
 ### Dependencies
 
 * FEniCSx (www.fenicsproject.org)
@@ -60,13 +69,20 @@ Similarly with `output/membrane_state.pvsm` to visualise ECS-ICS membrane potent
 
 ### Contributors
 
-* Pietro Benedusi
 * Edoardo Centofanti
-* Joshua Steyer
 * Benjamin Pachev
+* Joshua Steyer
+* Pietro Benedusi
 
 ### Cite
 ```
+@misc{centofanti2026multigpu,
+  title={Multi-GPU Acceleration of an Interface Problem with Application to Cardiac Modeling in FEniCS},
+  author={Centofanti, Edoardo and Pachev, Benjamin and Steyer, Joshua and Trotter, James D. and Benedusi, Pietro},
+  year={2026},
+  note={Preprint}
+}
+
 @article{benedusi2024scalable,
   title={Scalable approximation and solvers for ionic electrodiffusion in cellular geometries},
   author={Benedusi, Pietro and Ellingsrud, Ada Johanne and Herlyng, Halvor and Rognes, Marie E},

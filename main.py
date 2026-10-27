@@ -303,6 +303,12 @@ for i in TAGS:
     a.append(a_i)
 if cuda:
     asm = cufem.CUDAAssembler()
+    # cudolfinx 0.9 block forms cannot contain None blocks: replace them with an
+    # integral over an empty cell subdomain (no entries, nothing assembled)
+    if not hasattr(asm, "apply_lifting_block"):
+        EMPTY_TAG = comm.allreduce(int(subdomains.values.max(initial=0)), op=MPI.MAX) + 1000
+        a = [[a_ij if a_ij is not None else inner(u_dict[j], v_dict[i]) * dx(EMPTY_TAG)
+              for j, a_ij in zip(TAGS, a_i)] for i, a_i in zip(TAGS, a)]
     if comm.rank == 0: print("Making forms.")
     cuda_a = cufem.form(a, restriction=(restriction_dof_list, restriction_dof_list))
     if comm.rank == 0: print("calling create matrix block.")
@@ -320,9 +326,35 @@ t1 = time.perf_counter()
 # #---------------------------#
 
 if cuda:
-  asm.assemble_matrix_block(cuda_a, cuda_A,  bcs=bcs)
+  # cudolfinx 0.9 has no apply_lifting_block and indexes bcs as a nested list.
+  # The Dirichlet BC is homogeneous, so the lifting vanishes and the BC reduces
+  # to zeroing the constrained rows and columns of A (unit diagonal) and the
+  # constrained entries of b, as multiphenicsx does on the CPU path.
+  manual_bc = bool(bcs) and not hasattr(asm, "apply_lifting_block")
+  asm.assemble_matrix_block(cuda_a, cuda_A, bcs=bcs if bcs and not manual_bc else None)
   cuda_A.assemble()
   A = cuda_A.mat
+  if manual_bc:
+    for bc in bcs:
+      if not np.all(bc.g.value == 0):
+        raise NotImplementedError("Only homogeneous Dirichlet BCs are supported on GPU with cudolfinx 0.9")
+    # global rows of the constrained dofs in the restricted block numbering of
+    # cudolfinx: on each rank, the owned restricted dofs of block k follow those
+    # of blocks 0..k-1, in the order of restriction_dof_list[k]
+    block_offsets = np.cumsum([0] + restriction_local_sizes)
+    row_start = A.getOwnershipRange()[0]
+    bc_rows = []
+    for bc in bcs:
+      dofs, first_ghost = bc.dof_indices()
+      for d in dofs[:first_ghost]:
+        for k, restricted in enumerate(restriction_dof_list):
+          pos = np.flatnonzero(restricted == d)
+          if pos.size:
+            bc_rows.append(row_start + block_offsets[k] + int(pos[0]))
+    bc_rows = np.array(bc_rows, dtype=PETSc.IntType)
+    A.zeroRowsColumns(bc_rows, diag=1.0)
+    n_bc_rows = comm.allreduce(len(bc_rows))  # collective: called on all ranks
+    if comm.rank == 0: print(f"Dirichlet BC applied by hand on GPU: {n_bc_rows} rows")
 else:
   # Assemble the block linear system matrix
   A = multiphenicsx.fem.petsc.assemble_matrix_block(a, bcs=bcs, restriction=(restriction, restriction))
@@ -544,8 +576,12 @@ for time_step in range(params["time_steps"]):
         vector_assemble_setup_time = time.perf_counter() - t_test
     if cuda:
         asm.assemble_vector_block(L, cuda_b)
-        # apply lifting
-        asm.apply_lifting_block(cuda_b, cuda_a, bcs, set_bcs=True)
+        if manual_bc:
+            # homogeneous Dirichlet BC: zero lifting, constrained entries set to 0
+            b.setValues(bc_rows, np.zeros(len(bc_rows)), addv=PETSc.InsertMode.INSERT_VALUES)
+            b.assemble()
+        elif bcs:
+            asm.apply_lifting_block(cuda_b, cuda_a, bcs, set_bcs=True)
     else:
         # Clear RHS vector to avoid accumulation and assemble RHS
         b.array[:] = 0
