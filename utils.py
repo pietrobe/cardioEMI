@@ -5,7 +5,8 @@ from petsc4py import PETSc
 #import scipy.io as sio
 import numpy        as np
 import numpy.typing as npt
-import matplotlib.pyplot as plt
+# matplotlib is imported lazily in plot_sparsity_pattern: importing it at module load
+# makes every MPI rank build the font cache, which can hang on parallel file systems
 import sys
 import ufl
 import os
@@ -227,6 +228,7 @@ def common_elements(set1, set2):
     return set1.intersection(set2)
 
 def plot_sparsity_pattern(A):
+    import matplotlib.pyplot as plt
     ai, aj, av = A.getValuesCSR()
     rows, cols = A.getSize()
     sparse_matrix = sparse.csr_matrix((av, aj, ai), shape=(rows, cols))
