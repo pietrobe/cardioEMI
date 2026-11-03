@@ -14,6 +14,7 @@ It provides the code, parameters and step-by-step instructions to reproduce the 
 
 * FEniCSx (www.fenicsproject.org)
 * multiphenicsx (https://github.com/multiphenics/multiphenicsx)
+* cuDOLFINx (https://github.com/bpachev/cuda-dolfinx)
 
 
 ### Download
