@@ -1,0 +1,48 @@
+mesh_file             : "data/test_millie/millie_clean/millie-5_clean.xdmf"
+tags_dictionary_file  : "data/test_millie/millie_clean/millie-5_clean.pickle"
+mesh_conversion_factor: 0.0001
+fem_order: 1
+
+# Temporal parameters
+dt         : 0.002
+time_steps : 300
+
+# Physical parameters
+C_M       : 1
+sigma_i   : 5
+sigma_e   : 1
+R_g       : 0.003
+
+# Initial membrane potential
+# v_init: "-80 * (1 - (x[0] > 0.7) * (x[1] > 0.7))"
+# v_init: "-80 * (x[0] > 100)"
+# v_init: "-80 * (x[0] > 0.01)"
+v_init: "-80 * (1 - (x[0] > 0.075) * (x[1] > 0.07) * (x[2] > 0.07))"
+
+# boundary conditions
+Dirichlet_points: 1
+
+# Ionic model
+ionic_model:
+  intra_intra: "Passive"
+  intra_extra: "AP"
+
+# Mechanics (one-way coupled; all values are placeholders)
+mechanics:
+  T_max: 5.0
+  E_ics: 20.0
+  E_ecs: 1.0
+  nu_ics: 0.45
+  nu_ecs: 0.45
+  isotropic: False
+
+# Solver
+ksp_type: "cg"
+pc_type : "jacobi"
+ksp_rtol: 1e-6
+
+# Output
+save_output  : True
+save_interval: 5
+verbose      : False
+out_name: 'output_elastic'
